@@ -15,7 +15,7 @@ class APIResultsViewer:
     def __init__(self):
         self.root = ctk.CTk()
         self.root.title("API Test Results Viewer")
-        self.root.geometry("1000x700")
+        self.root.geometry("900x800")
         
         # Create main frame
         main_frame = ctk.CTkFrame(self.root)
@@ -277,17 +277,28 @@ class APIResultsViewer:
         self.log("=== Downloaded Photos Information ===", "blue")
         
         try:
-            # Check for test_downloaded_photos directory
-            photos_dir = Path("test_downloaded_photos")
-            if not photos_dir.exists():
-                self.log("❌ No test_downloaded_photos directory found", "red")
+            # Check for downloaded_photos directory
+            base_dir = Path("downloaded_photos")
+            if not base_dir.exists():
+                self.log("❌ No downloaded_photos directory found", "red")
                 self.log("Run 'Test Photo Download' first", "yellow")
                 return
             
+            # Find all test directories (test_YYYYMMDD_HHMMSS)
+            test_dirs = [d for d in base_dir.iterdir() if d.is_dir() and d.name.startswith("test_")]
+            if not test_dirs:
+                self.log("❌ No test download directories found", "red")
+                self.log("Run 'Test Photo Download' first", "yellow")
+                return
+            
+            # Get the most recent test directory
+            latest_test_dir = max(test_dirs, key=lambda x: x.name)
+            self.log(f"📁 Checking latest test directory: {latest_test_dir.name}", "blue")
+            
             # List all files in the directory
-            photo_files = list(photos_dir.glob("*"))
+            photo_files = list(latest_test_dir.glob("*"))
             if not photo_files:
-                self.log("❌ No photos found in test_downloaded_photos directory", "red")
+                self.log("❌ No photos found in latest test directory", "red")
                 return
             
             self.log(f"✅ Found {len(photo_files)} downloaded photos:", "green")
@@ -297,20 +308,94 @@ class APIResultsViewer:
                 self.log(f"  {i}. {photo_file.name} ({file_size:,} bytes)", "white")
                 
                 # Try to extract metadata from filename
-                filename_parts = photo_file.name.split('-')
-                if len(filename_parts) >= 4:
-                    question_name = filename_parts[1]
-                    user_id = filename_parts[2]
-                    form_id = filename_parts[3].replace('.jpg', '').replace('.jpeg', '').replace('.png', '')
+                filename = photo_file.name
+                
+                # Remove file extension
+                name_without_ext = filename.replace('.jpg', '').replace('.jpeg', '').replace('.png', '').replace('.gif', '').replace('.bmp', '')
+                
+                # Check if it's the expected format: test_photo-{question_name}-{user_id}-form_{form_uuid}
+                if name_without_ext.startswith('test_photo-') and 'form_' in name_without_ext:
+                    # Expected format: test_photo-{question_name}-{user_id}-form_{form_uuid}
+                    parts = name_without_ext.split('-')
                     
-                    self.log(f"     Question: {question_name}", "gray")
-                    self.log(f"     User ID: {user_id}", "gray")
-                    self.log(f"     Form ID: {form_id}", "gray")
+                    if len(parts) >= 4:
+                        # Find the part that starts with 'form_'
+                        form_part = None
+                        for part in parts:
+                            if part.startswith('form_'):
+                                form_part = part
+                                break
+                        
+                        if form_part:
+                            # Extract form_id (everything after 'form_')
+                            form_id = form_part.replace('form_', '')
+                            
+                            # The question name should be the second part (index 1)
+                            question_name = parts[1] if len(parts) > 1 else "unknown"
+                            
+                            # The user_id should be the third part (index 2)
+                            user_id = parts[2] if len(parts) > 2 else "unknown"
+                            
+                            self.log(f"     Question: {question_name}", "gray")
+                            self.log(f"     User ID: {user_id}", "gray")
+                            self.log(f"     Form ID: {form_id}", "gray")
+                        else:
+                            self.log(f"     Could not parse form ID from filename", "gray")
+                    else:
+                        self.log(f"     Filename format unexpected: {filename}", "gray")
+                
+                # Check if it's the api_photo format: api_photo-{question_name}-{user_id}-form_{form_uuid}
+                elif name_without_ext.startswith('api_photo-') and 'form_' in name_without_ext:
+                    # API format: api_photo-{question_name}-{user_id}-form_{form_uuid}
+                    parts = name_without_ext.split('-')
+                    
+                    if len(parts) >= 4:
+                        # Find the part that starts with 'form_'
+                        form_part = None
+                        for part in parts:
+                            if part.startswith('form_'):
+                                form_part = part
+                                break
+                        
+                        if form_part:
+                            # Extract form_id (everything after 'form_')
+                            form_id = form_part.replace('form_', '')
+                            
+                            # The question name should be the second part (index 1)
+                            question_name = parts[1] if len(parts) > 1 else "unknown"
+                            
+                            # The user_id should be the third part (index 2)
+                            user_id = parts[2] if len(parts) > 2 else "unknown"
+                            
+                            self.log(f"     Question: {question_name}", "gray")
+                            self.log(f"     User ID: {user_id}", "gray")
+                            self.log(f"     Form ID: {form_id}", "gray")
+                        else:
+                            self.log(f"     Could not parse form ID from filename", "gray")
+                    else:
+                        self.log(f"     Filename format unexpected: {filename}", "gray")
+                
+                # Handle simple timestamp format (like 1749818959721.jpg)
+                elif name_without_ext.isdigit():
+                    self.log(f"     Filename appears to be timestamp: {name_without_ext}", "gray")
+                    self.log(f"     Note: This suggests the filename creation may not be working as expected", "yellow")
+                    self.log(f"     Expected format: test_photo-{{question}}-{{user_id}}-form_{{form_uuid}}.jpg", "yellow")
+                
+                else:
+                    self.log(f"     Unknown filename format: {filename}", "gray")
+                    self.log(f"     Raw filename: {filename}", "gray")
                 
                 self.log("")  # Empty line for readability
             
             # Show directory path
-            self.log(f"Photos saved to: {photos_dir.absolute()}", "blue")
+            self.log(f"Photos saved to: {latest_test_dir.absolute()}", "blue")
+            
+            # Show all available test directories
+            if len(test_dirs) > 1:
+                self.log(f"\n📁 Available test directories ({len(test_dirs)} total):", "blue")
+                for test_dir in sorted(test_dirs, key=lambda x: x.name, reverse=True):
+                    photo_count = len(list(test_dir.glob("*")))
+                    self.log(f"  - {test_dir.name} ({photo_count} photos)", "gray")
             
         except Exception as e:
             self.log(f"❌ Error reading downloaded photos: {e}", "red")

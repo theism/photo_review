@@ -2,6 +2,9 @@
 app_settings.txt
 api_inputs.txt
 
+# Downloaded photos directory
+downloaded_photos/
+
 # Python cache files
 __pycache__/
 *.py[cod]

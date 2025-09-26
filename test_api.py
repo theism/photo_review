@@ -61,7 +61,7 @@ def test_env_file():
     
     coverage_path = Path("C:/Users/Mathew Theis/Documents/Coverage/.env")
     if not coverage_path.exists():
-        print(f"❌ .env file not found at: {coverage_path}")
+        print(f"[FAIL] .env file not found at: {coverage_path}")
         return None, None
     
     try:
@@ -149,10 +149,10 @@ def test_api_call(domain_form_pairs, username, api_key):
                         print(f"\n=== Testing Photo Download ===")
                         downloaded_photos = test_photo_download(photo_forms, username, api_key)
                         if downloaded_photos:
-                            print(f"✅ Successfully downloaded {len(downloaded_photos)} photos")
+                            print(f"[OK] Successfully downloaded {len(downloaded_photos)} photos")
                             return downloaded_photos
                         else:
-                            print("❌ No photos were downloaded")
+                            print("[FAIL] No photos were downloaded")
                     else:
                         print("No forms with photo attachments found")
                         
@@ -189,8 +189,11 @@ def test_photo_download(forms_data, username, api_key):
     print("\n=== Testing Photo Download ===")
     
     downloaded_photos = []
-    download_dir = Path("test_downloaded_photos")
-    download_dir.mkdir(exist_ok=True)
+    # Create timestamped subdirectory
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    download_dir = Path("downloaded_photos") / f"test_{timestamp}"
+    download_dir.mkdir(parents=True, exist_ok=True)
     
     photo_count = 0
     limit = 5  # Limit to 5 photos for testing
@@ -200,11 +203,14 @@ def test_photo_download(forms_data, username, api_key):
             break
             
         # Get form metadata
-        user_id = form.get('user_id', 'unknown')
-        form_uuid = form.get('id', 'unknown')
+        # User ID is in the form.meta section
+        form_data = form.get('form', {})
+        meta = form_data.get('meta', {})
+        user_id = meta.get('userID', 'unknown')
+        form_id = form.get('id', 'unknown')
         domain = form.get('domain', 'unknown')
         
-        print(f"Processing form {form_uuid} from user {user_id}")
+        print(f"Processing form {form_id} from user {user_id}")
         
         # Get attachments from the form data
         attachments = form.get('attachments', {})
@@ -234,9 +240,26 @@ def test_photo_download(forms_data, username, api_key):
                         # Extract question name from attachment name or form data
                         question_name = extract_question_name(attachment_name, form)
                         
-                        # Create filename in CommCare format
-                        filename = f"test_photo-{question_name}-{user_id}-form_{form_uuid}"
+                        # Create filename in CommCare format with proper extension
+                        # Determine file extension from original attachment name
+                        file_ext = '.jpg'  # Default to .jpg
+                        if attachment_name.lower().endswith('.jpeg'):
+                            file_ext = '.jpeg'
+                        elif attachment_name.lower().endswith('.png'):
+                            file_ext = '.png'
+                        elif attachment_name.lower().endswith('.gif'):
+                            file_ext = '.gif'
+                        elif attachment_name.lower().endswith('.bmp'):
+                            file_ext = '.bmp'
+                        
+                        filename = f"test_photo-{question_name}-{user_id}-form_{form_id}{file_ext}"
                         file_path = download_dir / filename
+                        
+                        print(f"    DEBUG: Creating filename: {filename}")
+                        print(f"    DEBUG: Question name: {question_name}")
+                        print(f"    DEBUG: User ID: {user_id}")
+                        print(f"    DEBUG: Form UUID: {form_id}")
+                        print(f"    DEBUG: File extension: {file_ext}")
                         
                         with open(file_path, 'wb') as f:
                             f.write(photo_response.content)
@@ -255,25 +278,39 @@ def test_photo_download(forms_data, username, api_key):
     return downloaded_photos
 
 def extract_question_name(attachment_name, form):
-    """Extract question name from attachment name or form data"""
+    """Extract question name from form data by finding the key that has this attachment as its value"""
     # Look for question path in form data that matches this attachment
     form_data = form.get('form', {})
     if form_data:
-        # Look through form data for photo-related questions
-        for key, value in form_data.items():
-            if isinstance(value, str) and attachment_name in value:
-                # Extract question name from the key or value
-                if 'photograph' in key.lower() or 'photo' in key.lower():
-                    return key
-                elif 'photograph' in value.lower() or 'photo' in value.lower():
-                    # Try to extract question name from the value
-                    parts = value.split('/')
-                    for part in parts:
-                        if 'photograph' in part.lower() or 'photo' in part.lower():
-                            return part
+        # Recursively search through nested dictionaries
+        def find_question_in_data(data, path=""):
+            if isinstance(data, dict):
+                for key, value in data.items():
+                    current_path = f"{path}.{key}" if path else key
+                    if isinstance(value, str) and value == attachment_name:
+                        # Found the key that corresponds to this attachment
+                        print(f"    DEBUG: Found question key '{key}' for attachment '{attachment_name}' at path '{current_path}'")
+                        return key
+                    elif isinstance(value, str) and attachment_name in value:
+                        # Partial match - the value contains the attachment name
+                        print(f"    DEBUG: Found partial match - key '{key}' contains attachment '{attachment_name}' at path '{current_path}'")
+                        return key
+                    elif isinstance(value, dict):
+                        # Recursively search nested dictionaries
+                        result = find_question_in_data(value, current_path)
+                        if result:
+                            return result
+            return None
+        
+        # Search through the form data
+        question_name = find_question_in_data(form_data)
+        if question_name:
+            return question_name
     
     # Fallback: use a generic name based on attachment
-    return attachment_name.replace('.jpg', '').replace('.jpeg', '').replace('.png', '')
+    fallback_name = attachment_name.replace('.jpg', '').replace('.jpeg', '').replace('.png', '')
+    print(f"    DEBUG: Using fallback question name: {fallback_name}")
+    return fallback_name
 
 def main():
     """Main test function"""

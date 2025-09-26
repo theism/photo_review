@@ -37,7 +37,7 @@ class App(ctk.CTk):
         
         # API-specific variables
         self.api_file_var = ctk.StringVar()
-        self.date_start_var = ctk.StringVar(value="01/01/25")
+        self.date_start_var = ctk.StringVar(value="01/01/24")
         self.date_end_var = ctk.StringVar()
         self.api_limit_var = ctk.StringVar(value="20")
         
@@ -110,7 +110,7 @@ class App(ctk.CTk):
         date_row = ctk.CTkFrame(self.api_controls_frame)
         date_row.pack(fill="x", pady=(0, 8))
         ctk.CTkLabel(date_row, text="Start Date (MM/DD/YY):").pack(side="left")
-        self.start_date_entry = ctk.CTkEntry(date_row, textvariable=self.date_start_var, width=120, placeholder_text="01/01/25")
+        self.start_date_entry = ctk.CTkEntry(date_row, textvariable=self.date_start_var, width=120, placeholder_text="01/01/24")
         self.start_date_entry.pack(side="left", padx=(6, 12))
         ctk.CTkLabel(date_row, text="End Date (MM/DD/YY):").pack(side="left")
         self.end_date_entry = ctk.CTkEntry(date_row, textvariable=self.date_end_var, width=120, placeholder_text="12/31/25")
@@ -814,10 +814,14 @@ class App(ctk.CTk):
                 
                 params = {
                     'xmlns': form_xmlns,
-                    'received_on_start': date_start,
-                    'received_on_end': date_end,
                     'limit': limit
                 }
+                
+                # Only add date filters if dates are provided and not empty
+                if date_start and date_start.strip():
+                    params['received_on_start'] = date_start
+                if date_end and date_end.strip():
+                    params['received_on_end'] = date_end
                 print(f"  API Parameters: {params}")
                 
                 print(f"  Making API request...")
@@ -832,7 +836,28 @@ class App(ctk.CTk):
                     if 'objects' in data:
                         forms = data['objects']
                         print(f"  Found {len(forms)} forms for domain {domain}")
-                        all_forms.extend(forms)
+                        
+                        # If no forms found with xmlns, try without xmlns parameter
+                        if len(forms) == 0:
+                            print(f"  No forms found with xmlns '{form_xmlns}', trying without xmlns filter...")
+                            params_without_xmlns = {k: v for k, v in params.items() if k != 'xmlns'}
+                            print(f"  Retry API Parameters: {params_without_xmlns}")
+                            
+                            retry_response = requests.get(url, auth=(username, api_key), params=params_without_xmlns, timeout=30)
+                            if retry_response.status_code == 200:
+                                retry_data = retry_response.json()
+                                if 'objects' in retry_data:
+                                    retry_forms = retry_data['objects']
+                                    print(f"  Found {len(retry_forms)} forms without xmlns filter")
+                                    all_forms.extend(retry_forms)
+                                    
+                                    # Show sample of what forms are available
+                                    if retry_forms:
+                                        sample_form = retry_forms[0]
+                                        print(f"  Sample form xmlns: {sample_form.get('xmlns', 'N/A')}")
+                                        print(f"  Sample form type: {sample_form.get('type', 'N/A')}")
+                        else:
+                            all_forms.extend(forms)
                         
                         # Debug: Show sample form data
                         if forms:
@@ -876,8 +901,11 @@ class App(ctk.CTk):
         print(f"Photo limit: {limit}")
         
         downloaded_photos = []
-        download_dir = Path("downloaded_photos")
-        download_dir.mkdir(exist_ok=True)
+        # Create timestamped subdirectory for this download session
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        download_dir = Path("downloaded_photos") / f"session_{timestamp}"
+        download_dir.mkdir(parents=True, exist_ok=True)
         print(f"Download directory: {download_dir.absolute()}")
         
         photo_count = 0
@@ -893,11 +921,14 @@ class App(ctk.CTk):
             print(f"  Processing form {i+1}/{len(forms_data)}")
             
             # Get form metadata
-            user_id = form.get('user_id', 'unknown')
-            form_uuid = form.get('id', 'unknown')
+            # User ID is in the form.meta section
+            form_data = form.get('form', {})
+            meta = form_data.get('meta', {})
+            user_id = meta.get('userID', 'unknown')
+            form_id = form.get('id', 'unknown')
             domain = form.get('domain', 'unknown')
             
-            print(f"    Form ID: {form_uuid}")
+            print(f"    Form ID: {form_id}")
             print(f"    User ID: {user_id}")
             print(f"    Domain: {domain}")
             
@@ -941,8 +972,19 @@ class App(ctk.CTk):
                                 question_name = self._extract_question_name(attachment_name, form)
                                 print(f"      Question name: {question_name}")
                                 
-                                # Create filename in CommCare format
-                                filename = f"api_photo-{question_name}-{user_id}-form_{form_uuid}"
+                                # Create filename in CommCare format with proper extension
+                                # Determine file extension from original attachment name
+                                file_ext = '.jpg'  # Default to .jpg
+                                if attachment_name.lower().endswith('.jpeg'):
+                                    file_ext = '.jpeg'
+                                elif attachment_name.lower().endswith('.png'):
+                                    file_ext = '.png'
+                                elif attachment_name.lower().endswith('.gif'):
+                                    file_ext = '.gif'
+                                elif attachment_name.lower().endswith('.bmp'):
+                                    file_ext = '.bmp'
+                                
+                                filename = f"api_photo-{question_name}-{user_id}-form_{form_id}{file_ext}"
                                 file_path = download_dir / filename
                                 
                                 with open(file_path, 'wb') as f:
@@ -978,25 +1020,39 @@ class App(ctk.CTk):
         return downloaded_photos
 
     def _extract_question_name(self, attachment_name: str, form: dict) -> str:
-        """Extract question name from attachment name or form data"""
+        """Extract question name from form data by finding the key that has this attachment as its value"""
         # Try to find the question name in the form data
         form_data = form.get('form', {})
         if isinstance(form_data, dict):
-            # Look for keys or values that might contain the attachment name
-            for key, value in form_data.items():
-                if isinstance(value, str) and attachment_name in value:
-                    # Extract the relevant part
-                    if 'photograph' in key.lower() or 'photo' in key.lower():
-                        return key
-                    elif 'photograph' in value.lower() or 'photo' in value.lower():
-                        # Extract the question name from the value
-                        parts = value.split('-')
-                        for part in parts:
-                            if 'photograph' in part.lower() or 'photo' in part.lower():
-                                return part
+            # Recursively search through nested dictionaries
+            def find_question_in_data(data, path=""):
+                if isinstance(data, dict):
+                    for key, value in data.items():
+                        current_path = f"{path}.{key}" if path else key
+                        if isinstance(value, str) and value == attachment_name:
+                            # Found the key that corresponds to this attachment
+                            print(f"      DEBUG: Found question key '{key}' for attachment '{attachment_name}' at path '{current_path}'")
+                            return key
+                        elif isinstance(value, str) and attachment_name in value:
+                            # Partial match - the value contains the attachment name
+                            print(f"      DEBUG: Found partial match - key '{key}' contains attachment '{attachment_name}' at path '{current_path}'")
+                            return key
+                        elif isinstance(value, dict):
+                            # Recursively search nested dictionaries
+                            result = find_question_in_data(value, current_path)
+                            if result:
+                                return result
+                return None
+            
+            # Search through the form data
+            question_name = find_question_in_data(form_data)
+            if question_name:
+                return question_name
         
         # Fallback: use a cleaned version of the attachment name
-        return attachment_name.replace('.jpg', '').replace('.jpeg', '').replace('.png', '')
+        fallback_name = attachment_name.replace('.jpg', '').replace('.jpeg', '').replace('.png', '')
+        print(f"      DEBUG: Using fallback question name: {fallback_name}")
+        return fallback_name
 
     def _process_downloaded_photos(self, downloaded_photos: list) -> None:
         """Process downloaded photos and update the GUI"""
