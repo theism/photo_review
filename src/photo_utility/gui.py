@@ -10,6 +10,9 @@ from PIL import Image, ImageTk
 import csv
 from datetime import datetime
 import webbrowser
+import requests
+import json
+import os
 
 from .scanner import scan_directory_for_photos, group_by_question_id, group_by_form_id
 
@@ -18,7 +21,7 @@ class App(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Photo Review Utility")
-        self.geometry("800x600")
+        self.geometry("900x600")
         ctk.set_appearance_mode("light")
         ctk.set_default_color_theme("blue")
 
@@ -28,9 +31,20 @@ class App(ctk.CTk):
         self.percent_var = ctk.StringVar(value="10.0")  # Use StringVar to avoid conversion errors
         self.include_known_bad_var = ctk.BooleanVar(value=False)
         self.known_bad_dir_var = ctk.StringVar()
-        self.known_bad_count_var = ctk.StringVar(value="5")  # Number of bad photos to insert
+        self.known_bad_count_var = ctk.StringVar(value="")  # Number of bad photos to insert
         self.path_mode_var = ctk.StringVar(value="local")  # local or api
         self.reviewer_name_var = ctk.StringVar()
+        
+        # API-specific variables
+        self.api_file_var = ctk.StringVar()
+        self.date_start_var = ctk.StringVar(value="01/01/25")
+        self.date_end_var = ctk.StringVar()
+        self.api_limit_var = ctk.StringVar(value="20")
+        
+        # Set today's date as default for end date in MM/DD/YY format
+        from datetime import datetime
+        today = datetime.now().strftime("%m/%d/%y")
+        self.date_end_var.set(today)
 
         self._build_path_a_controls()
 
@@ -46,6 +60,12 @@ class App(ctk.CTk):
         
         # Load saved settings
         self._load_settings()
+        
+        # Initially hide API controls and show local directory controls
+        self.api_controls_frame.pack_forget()
+        
+        # Initialize question options
+        self.question_options = []
 
     def _build_path_a_controls(self) -> None:
         # Use a scrollable frame to contain all controls
@@ -60,73 +80,116 @@ class App(ctk.CTk):
         ctk.CTkLabel(reviewer_row, text="Reviewer name:").pack(side="left")
         ctk.CTkEntry(reviewer_row, textvariable=self.reviewer_name_var, width=200).pack(side="left", padx=(6, 0))
 
-        # Path selector (placeholder for Path B)
+        # Data Source selector
         mode_row = ctk.CTkFrame(frm)
         mode_row.pack(fill="x", pady=(0, 8))
         ctk.CTkLabel(mode_row, text="Data Source:").pack(side="left")
-        ctk.CTkRadioButton(mode_row, text="Local directory", variable=self.path_mode_var, value="local").pack(side="left", padx=(6, 0))
-        ctk.CTkRadioButton(mode_row, text="CommCare API (coming soon)", variable=self.path_mode_var, value="api").pack(side="left", padx=(6, 0))
+        ctk.CTkRadioButton(mode_row, text="Local directory", variable=self.path_mode_var, value="local", command=self._on_data_source_change).pack(side="left", padx=(6, 0))
+        ctk.CTkRadioButton(mode_row, text="CommCare API", variable=self.path_mode_var, value="api", command=self._on_data_source_change).pack(side="left", padx=(6, 0))
 
         # Status text below data source
         self.status_label = ctk.CTkLabel(frm, text="Select a directory and click 'Check Photo Data'", text_color="gray")
         self.status_label.pack(anchor="w", pady=(0, 8))
 
-        row1 = ctk.CTkFrame(frm)
-        row1.pack(fill="x", pady=(0, 8))
-        ctk.CTkLabel(row1, text="Local directory:").pack(side="left")
-        ctk.CTkEntry(row1, textvariable=self.dir_var, width=400).pack(side="left", padx=6)
-        ctk.CTkButton(row1, text="Browse", command=self._browse_dir, width=80).pack(side="left", padx=6)
-
-        row2 = ctk.CTkFrame(frm)
-        row2.pack(fill="x", pady=(0, 8))
-        ctk.CTkButton(row2, text="Check Photo Data", command=self._get_data, width=120).pack(side="left")
-
-        row3 = ctk.CTkFrame(frm)
-        row3.pack(fill="x", pady=(0, 0))
-        ctk.CTkLabel(row3, text="Photo filter (multi-select):").pack(anchor="w", pady=(8, 4))
+        # Data source controls container
+        self.data_source_frame = ctk.CTkFrame(frm)
+        self.data_source_frame.pack(fill="x", pady=(0, 8))
         
-        # Use a regular Tkinter Listbox with CustomTkinter styling
-        import tkinter as tk
-        listbox_frame = ctk.CTkFrame(row3)
-        listbox_frame.pack(fill="x", padx=8, pady=(0, 8))
+        # Local directory controls
+        self.local_dir_frame = ctk.CTkFrame(self.data_source_frame)
+        self.local_dir_frame.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(self.local_dir_frame, text="Local directory:").pack(side="left")
+        ctk.CTkEntry(self.local_dir_frame, textvariable=self.dir_var, width=400).pack(side="left", padx=6)
+        ctk.CTkButton(self.local_dir_frame, text="Browse", command=self._browse_dir, width=80).pack(side="left", padx=6)
+        ctk.CTkButton(self.local_dir_frame, text="Check Photo Data", command=self._get_data, width=120).pack(side="left", padx=6)
+
+        # API controls (initially hidden)
+        self.api_controls_frame = ctk.CTkFrame(self.data_source_frame)
         
-        self.question_listbox = tk.Listbox(listbox_frame, height=4, selectmode=tk.MULTIPLE, font=("Arial", 12))
-        self.question_listbox.pack(fill="x", padx=4, pady=4)
-        self.question_listbox.bind("<<ListboxSelect>>", self._on_question_select)
-        self.question_checkboxes = {}  # Keep for compatibility but won't be used
+        # Date range
+        date_row = ctk.CTkFrame(self.api_controls_frame)
+        date_row.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(date_row, text="Start Date (MM/DD/YY):").pack(side="left")
+        self.start_date_entry = ctk.CTkEntry(date_row, textvariable=self.date_start_var, width=120, placeholder_text="01/01/25")
+        self.start_date_entry.pack(side="left", padx=(6, 12))
+        ctk.CTkLabel(date_row, text="End Date (MM/DD/YY):").pack(side="left")
+        self.end_date_entry = ctk.CTkEntry(date_row, textvariable=self.date_end_var, width=120, placeholder_text="12/31/25")
+        self.end_date_entry.pack(side="left", padx=(6, 0))
+        
+        # Number of forms to download
+        limit_row = ctk.CTkFrame(self.api_controls_frame)
+        limit_row.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(limit_row, text="Number of forms to download:").pack(side="left")
+        ctk.CTkEntry(limit_row, textvariable=self.api_limit_var, width=80).pack(side="left", padx=(6, 0))
+        ctk.CTkLabel(limit_row, text="Max 1000 forms. Download from HQ exporter if you want more", text_color="gray").pack(side="left", padx=(6, 0))
+        
+        # Domain/form pairs file
+        api_file_row = ctk.CTkFrame(self.api_controls_frame)
+        api_file_row.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(api_file_row, text="Domain/form pairs file:").pack(side="left")
+        ctk.CTkEntry(api_file_row, textvariable=self.api_file_var, width=400).pack(side="left", padx=6)
+        ctk.CTkButton(api_file_row, text="Browse", command=self._browse_api_file, width=80).pack(side="left", padx=6)
+        ctk.CTkButton(api_file_row, text="Check Photo Data", command=self._get_data, width=120).pack(side="left", padx=6)
 
-        row4 = ctk.CTkFrame(frm)
-        row4.pack(fill="x", pady=(0, 0))
-        ctk.CTkLabel(row4, text="List desired photo buckets (comma-separated):").pack(side="left")
-        ctk.CTkEntry(row4, textvariable=self.buckets_var, width=300).pack(side="left", padx=6)
+        # Two-column layout
+        columns_frame = ctk.CTkFrame(frm)
+        columns_frame.pack(fill="x", pady=(8, 0))
+        
+        # Left column - Photo filter
+        left_column = ctk.CTkFrame(columns_frame)
+        left_column.pack(side="left", fill="y", padx=(0, 8))
+        left_column.configure(width=500)
+        
+        ctk.CTkLabel(left_column, text="Photo filter (multi-select):").pack(anchor="w", pady=(8, 4))
+        
+        # Photo filter with checkboxes
+        self.photo_filter_frame = ctk.CTkScrollableFrame(left_column, height=200)
+        self.photo_filter_frame.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        self.question_checkboxes = {}
+        
+        # Right column - Other configuration
+        right_column = ctk.CTkFrame(columns_frame)
+        right_column.pack(side="right", fill="y")
+        right_column.configure(width=500)
+        
+        # Photo buckets
+        buckets_row = ctk.CTkFrame(right_column)
+        buckets_row.pack(fill="x", pady=(8, 8))
+        ctk.CTkLabel(buckets_row, text="List desired photo buckets (comma-separated):").pack(side="left")
+        ctk.CTkEntry(buckets_row, textvariable=self.buckets_var, width=300).pack(side="left", padx=6)
 
-        row5 = ctk.CTkFrame(frm)
-        row5.pack(fill="x", pady=(8, 0))
-        ctk.CTkLabel(row5, text="Percent of pictures to review:").pack(side="left")
-        self.percent_entry = ctk.CTkEntry(row5, textvariable=self.percent_var, width=80)
+        # Percent of pictures
+        percent_row = ctk.CTkFrame(right_column)
+        percent_row.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(percent_row, text="Percent of pictures to review:").pack(side="left")
+        self.percent_entry = ctk.CTkEntry(percent_row, textvariable=self.percent_var, width=80)
         self.percent_entry.pack(side="left", padx=6)
         self.percent_entry.bind("<KeyRelease>", lambda e: self._update_percent_count())
-        self.percent_count_label = ctk.CTkLabel(row5, text="")
+        self.percent_count_label = ctk.CTkLabel(percent_row, text="")
         self.percent_count_label.pack(side="left", padx=(12, 0))
 
-        row6 = ctk.CTkFrame(frm)
-        row6.pack(fill="x", pady=(8, 0))
-        ctk.CTkCheckBox(row6, text="Include known bad photos", variable=self.include_known_bad_var, command=self._toggle_known_bad_controls).pack(side="left")
+        # Include known bad photos checkbox
+        known_bad_row = ctk.CTkFrame(right_column)
+        known_bad_row.pack(fill="x", pady=(0, 8))
+        ctk.CTkCheckBox(known_bad_row, text="Include known bad photos", variable=self.include_known_bad_var, command=self._toggle_known_bad_controls).pack(side="left")
 
-        self.row7_kb = ctk.CTkFrame(frm)
+        # Known bad directory (initially hidden)
+        self.row7_kb = ctk.CTkFrame(right_column)
         self.row7_kb.pack(fill="x", pady=(4, 0))
         ctk.CTkLabel(self.row7_kb, text="Known bad photo directory:").pack(side="left")
         self.kb_entry = ctk.CTkEntry(self.row7_kb, textvariable=self.known_bad_dir_var, width=300)
         self.kb_entry.pack(side="left", padx=6)
         ctk.CTkButton(self.row7_kb, text="Browse", command=self._browse_known_bad_dir, width=80).pack(side="left", padx=6)
         
-        # Known bad count input
-        self.row8_kb = ctk.CTkFrame(frm)
+        # Known bad count input (initially hidden)
+        self.row8_kb = ctk.CTkFrame(right_column)
         self.row8_kb.pack(fill="x", pady=(4, 0))
         ctk.CTkLabel(self.row8_kb, text="Enter number of bad photos to randomly insert:").pack(side="left")
         ctk.CTkEntry(self.row8_kb, textvariable=self.known_bad_count_var, width=60).pack(side="left", padx=6)
 
-        # Removed the ratio control per request
+        # Initially hide known bad controls
+        self.row7_kb.pack_forget()
+        self.row8_kb.pack_forget()
 
         row9 = ctk.CTkFrame(frm)
         row9.pack(fill="x", pady=(12, 0))
@@ -155,18 +218,28 @@ class App(ctk.CTk):
             self.dir_var.set(path)
 
     def _get_data(self) -> None:
-        directory = self.dir_var.get().strip()
-        if not directory:
-            messagebox.showwarning("Missing", "Please select a directory.")
-            return
-        root = Path(directory)
-        if not root.exists() or not root.is_dir():
-            messagebox.showerror("Invalid", "Directory does not exist.")
-            return
+        mode = self.path_mode_var.get()
+        
+        if mode == "local":
+            # Handle local directory
+            directory = self.dir_var.get().strip()
+            if not directory:
+                from tkinter import messagebox
+                messagebox.showwarning("Missing", "Please select a directory.")
+                return
+            root = Path(directory)
+            if not root.exists() or not root.is_dir():
+                from tkinter import messagebox
+                messagebox.showerror("Invalid", "Directory does not exist.")
+                return
 
-        valid, invalid = scan_directory_for_photos(root)
-        self.valid_metas = valid
-        self.invalid_paths = invalid
+            valid, invalid = scan_directory_for_photos(root)
+            self.valid_metas = valid
+            self.invalid_paths = invalid
+        elif mode == "api":
+            # Handle API data
+            self._get_api_data()
+            return
 
         if invalid:
             self._show_warning_status("Some files do not match required format. Please download multimedia from CommCareHQ (per instructions).")
@@ -201,8 +274,8 @@ class App(ctk.CTk):
             self.row7_kb.pack(fill="x", pady=(4, 0))
             self.row8_kb.pack(fill="x", pady=(4, 0))
         else:
-            self.row7_kb.forget()
-            self.row8_kb.forget()
+            self.row7_kb.pack_forget()
+            self.row8_kb.pack_forget()
 
     def _browse_known_bad_dir(self) -> None:
         path = filedialog.askdirectory()
@@ -236,9 +309,28 @@ class App(ctk.CTk):
         include_kb = self.include_known_bad_var.get()
         kb_dir = None
         if include_kb:
-            kb_dir = Path(self.known_bad_dir_var.get().strip())
-            if not kb_dir or not kb_dir.exists() or not kb_dir.is_dir():
+            kb_dir_str = self.known_bad_dir_var.get().strip()
+            kb_count_str = self.known_bad_count_var.get().strip()
+            
+            # Validate known bad configuration
+            if not kb_dir_str or not kb_count_str:
+                messagebox.showwarning("Known Bad Configuration", 
+                    "Bad photo information not configured correctly. Either don't insert bad photos into the review or fill in the bad photo directory and number to insert.")
+                return
+            
+            kb_dir = Path(kb_dir_str)
+            if not kb_dir.exists() or not kb_dir.is_dir():
                 messagebox.showerror("Known bad", "Select a valid known bad directory.")
+                return
+            
+            # Validate count
+            try:
+                kb_count = int(kb_count_str)
+                if kb_count <= 0:
+                    messagebox.showwarning("Known Bad Count", "Number of bad photos must be greater than 0.")
+                    return
+            except ValueError:
+                messagebox.showwarning("Known Bad Count", "Enter a valid number for bad photos to insert.")
                 return
 
         # Compute filtered photos count for confirmation
@@ -262,34 +354,36 @@ class App(ctk.CTk):
         self._create_session_and_start_review()
 
     def _refresh_question_menu(self) -> None:
-        # Clear existing items
-        self.question_listbox.delete(0, "end")
+        # Clear existing checkboxes
+        for widget in self.photo_filter_frame.winfo_children():
+            widget.destroy()
+        self.question_checkboxes.clear()
         
         # Get photo counts for each question
         groups = group_by_question_id(self.valid_metas)
         
-        # Add items to listbox with photo counts
+        # Create checkboxes for each question option
         for opt in self.question_options:
             count = len(groups.get(opt, []))
-            self.question_listbox.insert("end", f"{opt} ({count} photos)")
-        
-        # Select all items by default
-        if self.question_options:
-            for i in range(len(self.question_options)):
-                self.question_listbox.selection_set(i)
+            var = ctk.BooleanVar(value=True)  # Default to selected
+            checkbox = ctk.CTkCheckBox(
+                self.photo_filter_frame, 
+                text=f"{opt} ({count} photos)",
+                variable=var,
+                command=self._on_question_select
+            )
+            checkbox.pack(anchor="w", pady=2)
+            self.question_checkboxes[opt] = var
         
         # Update selection state
         self._on_question_select()
 
     def _on_question_select(self, event=None) -> None:
-        # Get selected indices from listbox
-        selected_indices = self.question_listbox.curselection()
+        # Get selected questions from checkboxes
         self._selected_questions = []
-        
-        for idx in selected_indices:
-            if idx < len(self.question_options):
-                self._selected_questions.append(self.question_options[idx])
-        
+        for opt, var in self.question_checkboxes.items():
+            if var.get():
+                self._selected_questions.append(opt)
         self._update_percent_count()
 
     def _update_percent_count(self) -> None:
@@ -513,15 +607,28 @@ class App(ctk.CTk):
             self.main_scroll.destroy()
         # rebuild controls
         self._build_path_a_controls()
+        
+        # Restore data source selection and hide API controls if local is selected
+        current_mode = self.path_mode_var.get()
+        if current_mode == "local":
+            self.api_controls_frame.pack_forget()
+        elif current_mode == "api":
+            self.local_dir_frame.pack_forget()
+        
+        # Restore known bad photos checkbox state and show/hide controls accordingly
+        if self.include_known_bad_var.get():
+            self.row7_kb.pack(fill="x", pady=(4, 0))
+            self.row8_kb.pack(fill="x", pady=(4, 0))
+        else:
+            self.row7_kb.pack_forget()
+            self.row8_kb.pack_forget()
+        
         # Re-set state and restore previous selections
         self._refresh_question_menu()
-        # Restore previous selections in listbox
+        # Restore previous selections in checkboxes
         if hasattr(self, '_last_selected_questions') and self._last_selected_questions:
-            for i, question in enumerate(self.question_options):
-                if question in self._last_selected_questions:
-                    self.question_listbox.selection_set(i)
-                else:
-                    self.question_listbox.selection_clear(i)
+            for question, var in self.question_checkboxes.items():
+                var.set(question in self._last_selected_questions)
         self._on_question_select()
 
     def _load_settings(self) -> None:
@@ -534,15 +641,14 @@ class App(ctk.CTk):
                         name = line.split(":", 1)[1].strip()
                         if name:
                             self.reviewer_name_var.set(name)
-                            print(f"Loaded reviewer name: {name}")  # Debug output
                     elif line.startswith("last_directory:"):
                         directory = line.split(":", 1)[1].strip()
                         if directory:
                             self.dir_var.set(directory)
-                    elif line.startswith("known_bad_count:"):
-                        count = line.split(":", 1)[1].strip()
-                        if count:
-                            self.known_bad_count_var.set(count)
+                    elif line.startswith("api_file:"):
+                        api_file = line.split(":", 1)[1].strip()
+                        if api_file:
+                            self.api_file_var.set(api_file)
         except FileNotFoundError:
             pass  # No saved settings yet
         except Exception as e:
@@ -556,21 +662,491 @@ class App(ctk.CTk):
                 reviewer_name = self.reviewer_name_var.get().strip()
                 if reviewer_name:
                     f.write(f"reviewer_name:{reviewer_name}\n")
-                    print(f"Saved reviewer name: {reviewer_name}")  # Debug output
                 
                 # Save last directory
                 last_dir = self.dir_var.get().strip()
                 if last_dir:
                     f.write(f"last_directory:{last_dir}\n")
-                    print(f"Saved last directory: {last_dir}")  # Debug output
                 
-                # Save known bad count
-                kb_count = self.known_bad_count_var.get().strip()
-                if kb_count:
-                    f.write(f"known_bad_count:{kb_count}\n")
-                    print(f"Saved known bad count: {kb_count}")  # Debug output
+                # Don't save known bad count - should always start blank
+                
+                # Save API file path
+                api_file = self.api_file_var.get().strip()
+                if api_file:
+                    f.write(f"api_file:{api_file}\n")
         except Exception as e:
             print(f"Error saving settings: {e}")  # Debug output
+
+    def _on_data_source_change(self) -> None:
+        """Handle data source radio button changes"""
+        mode = self.path_mode_var.get()
+        if mode == "local":
+            self.local_dir_frame.pack(fill="x", pady=(0, 8))
+            self.api_controls_frame.pack_forget()
+            self.status_label.configure(text="Select a directory and click 'Check Photo Data'", text_color="gray")
+        elif mode == "api":
+            self.local_dir_frame.pack_forget()
+            self.api_controls_frame.pack(fill="x", pady=(0, 8))
+            self.status_label.configure(text="Configure API settings and click 'Check Photo Data'", text_color="gray")
+            # Reset photo filter when switching to API mode
+            self._reset_photo_filter()
+
+    def _reset_photo_filter(self) -> None:
+        """Reset photo filter when switching data sources"""
+        # Clear existing checkboxes
+        for widget in self.photo_filter_frame.winfo_children():
+            widget.destroy()
+        self.question_checkboxes.clear()
+        
+        # Clear question options and valid metas
+        self.question_options = []
+        self.valid_metas = []
+        self.invalid_paths = []
+        
+        # Update status
+        self.status_label.configure(text="Configure API settings and click 'Check Photo Data'", text_color="gray")
+
+    def _browse_api_file(self) -> None:
+        """Browse for API input file"""
+        from tkinter import filedialog
+        filename = filedialog.askopenfilename(
+            title="Select API input file",
+            filetypes=[("Text files", "*.txt"), ("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        if filename:
+            self.api_file_var.set(filename)
+
+    def _convert_date_format(self, date_str: str) -> str:
+        """Convert MM/DD/YY to YYYY-MM-DD format"""
+        try:
+            parts = date_str.split('/')
+            if len(parts) != 3:
+                return ""
+            
+            month, day, year = parts
+            month = int(month)
+            day = int(day)
+            year = int(year)
+            
+            # Convert 2-digit year to 4-digit
+            if year < 100:
+                if year < 50:  # Assume 20xx for years 00-49
+                    year += 2000
+                else:  # Assume 19xx for years 50-99
+                    year += 1900
+            
+            # Validate month and day
+            if not (1 <= month <= 12):
+                return ""
+            if not (1 <= day <= 31):
+                return ""
+            
+            return f"{year}-{month:02d}-{day:02d}"
+        except (ValueError, IndexError):
+            return ""
+
+    def _parse_domain_form_file(self, file_path: str) -> dict:
+        """Parse the domain/form pairs file"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Filter out comments
+            lines = [line.strip() for line in content.split('\n') if line.strip() and not line.strip().startswith('#')]
+            content = '\n'.join(lines)
+            
+            # Parse as JSON
+            import json
+            data = json.loads(content)
+            
+            domain_form_pairs = {}
+            for domain, form_xmlns in data.items():
+                # Extract UUID from form_xmlns if it's a full URL
+                if form_xmlns.startswith('http'):
+                    # Extract UUID from URL like "http://openrosa.org/formdesigner/UUID"
+                    form_xmlns = form_xmlns.split('/')[-1]
+                domain_form_pairs[domain] = form_xmlns
+            
+            return domain_form_pairs
+        except Exception as e:
+            print(f"Error parsing domain/form file: {e}")
+            return {}
+
+    def _find_env_file(self) -> str:
+        """Find the .env file in Coverage directory"""
+        import os
+        coverage_path = r"C:\Users\Mathew Theis\Documents\Coverage\.env"
+        if os.path.exists(coverage_path):
+            return coverage_path
+        return ""
+
+    def _load_api_credentials(self, env_file: str) -> tuple:
+        """Load API credentials from .env file"""
+        try:
+            with open(env_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('COMMCARE_USERNAME='):
+                        username = line.split('=', 1)[1].strip()
+                    elif line.startswith('COMMCARE_API_KEY='):
+                        api_key = line.split('=', 1)[1].strip()
+            
+            return username, api_key
+        except Exception as e:
+            print(f"Error loading credentials: {e}")
+            return "", ""
+
+    def _get_forms_from_api(self, domain_form_pairs: dict, date_start: str, date_end: str, username: str, api_key: str, limit: int) -> list:
+        """Get forms from CommCare List Forms API"""
+        import requests
+        import json
+        
+        all_forms = []
+        
+        for domain, form_xmlns in domain_form_pairs.items():
+            print(f"  Processing domain: {domain}")
+            print(f"  Form xmlns: {form_xmlns}")
+            
+            try:
+                # CommCare List Forms API
+                url = f"https://www.commcarehq.org/a/{domain}/api/v0.5/form/"
+                print(f"  API URL: {url}")
+                
+                params = {
+                    'xmlns': form_xmlns,
+                    'received_on_start': date_start,
+                    'received_on_end': date_end,
+                    'limit': limit
+                }
+                print(f"  API Parameters: {params}")
+                
+                print(f"  Making API request...")
+                response = requests.get(url, auth=(username, api_key), params=params, timeout=30)
+                print(f"  Response status: {response.status_code}")
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    print(f"  [OK] API call successful")
+                    print(f"  Response keys: {list(data.keys())}")
+                    
+                    if 'objects' in data:
+                        forms = data['objects']
+                        print(f"  Found {len(forms)} forms for domain {domain}")
+                        all_forms.extend(forms)
+                        
+                        # Debug: Show sample form data
+                        if forms:
+                            sample_form = forms[0]
+                            print(f"  Sample form keys: {list(sample_form.keys())}")
+                            if 'attachments' in sample_form:
+                                attachments = sample_form['attachments']
+                                print(f"  Sample form has {len(attachments)} attachments")
+                                for att_name, att_info in list(attachments.items())[:3]:  # Show first 3
+                                    print(f"    - {att_name}: {type(att_info)}")
+                    else:
+                        print(f"  [ERROR] No 'objects' key in response for domain {domain}")
+                        print(f"  Response data: {data}")
+                else:
+                    print(f"  [ERROR] API call failed with status {response.status_code}")
+                    print(f"  Response: {response.text}")
+                    
+            except requests.exceptions.Timeout:
+                print(f"  [ERROR] API request timed out for domain {domain}")
+                continue
+            except requests.exceptions.RequestException as e:
+                print(f"  [ERROR] API request failed for domain {domain}: {e}")
+                continue
+            except Exception as e:
+                print(f"  [ERROR] Unexpected error for domain {domain}: {e}")
+                import traceback
+                print(f"  Traceback: {traceback.format_exc()}")
+                continue
+        
+        print(f"Total forms collected: {len(all_forms)}")
+        return all_forms
+
+    def _download_attachments(self, forms_data: list, limit: int, username: str, api_key: str) -> list:
+        """Download attachments from forms using data from forms list API"""
+        import requests
+        import os
+        from pathlib import Path
+        
+        print(f"Starting photo download process...")
+        print(f"Forms to process: {len(forms_data)}")
+        print(f"Photo limit: {limit}")
+        
+        downloaded_photos = []
+        download_dir = Path("downloaded_photos")
+        download_dir.mkdir(exist_ok=True)
+        print(f"Download directory: {download_dir.absolute()}")
+        
+        photo_count = 0
+        forms_with_attachments = 0
+        total_attachments = 0
+        photo_attachments = 0
+        
+        for i, form in enumerate(forms_data):
+            if photo_count >= limit:
+                print(f"Reached photo limit ({limit}), stopping download")
+                break
+                
+            print(f"  Processing form {i+1}/{len(forms_data)}")
+            
+            # Get form metadata
+            user_id = form.get('user_id', 'unknown')
+            form_uuid = form.get('id', 'unknown')
+            domain = form.get('domain', 'unknown')
+            
+            print(f"    Form ID: {form_uuid}")
+            print(f"    User ID: {user_id}")
+            print(f"    Domain: {domain}")
+            
+            # Get attachments from the form data (already included in forms list API)
+            attachments = form.get('attachments', {})
+            print(f"    Attachments found: {len(attachments)}")
+            
+            if attachments:
+                forms_with_attachments += 1
+                total_attachments += len(attachments)
+                
+                for attachment_name, attachment_info in attachments.items():
+                    if photo_count >= limit:
+                        break
+                        
+                    print(f"      Processing attachment: {attachment_name}")
+                    print(f"      Attachment info type: {type(attachment_info)}")
+                    print(f"      Attachment info keys: {list(attachment_info.keys()) if isinstance(attachment_info, dict) else 'Not a dict'}")
+                    
+                    # Check if it's a photo file
+                    if attachment_name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp')):
+                        photo_attachments += 1
+                        print(f"      [OK] Photo file detected: {attachment_name}")
+                        
+                        try:
+                            # Get the download URL from attachment info
+                            download_url = attachment_info.get('download_url')
+                            if not download_url:
+                                # Try alternative URL structure
+                                download_url = attachment_info.get('url')
+                            
+                            print(f"      Download URL: {download_url}")
+                            
+                            if download_url:
+                                print(f"      Downloading photo...")
+                                # Download the photo
+                                photo_response = requests.get(download_url, auth=(username, api_key), timeout=30)
+                                photo_response.raise_for_status()
+                                
+                                # Extract question name from attachment name or form data
+                                question_name = self._extract_question_name(attachment_name, form)
+                                print(f"      Question name: {question_name}")
+                                
+                                # Create filename in CommCare format
+                                filename = f"api_photo-{question_name}-{user_id}-form_{form_uuid}"
+                                file_path = download_dir / filename
+                                
+                                with open(file_path, 'wb') as f:
+                                    f.write(photo_response.content)
+                                
+                                downloaded_photos.append(str(file_path))
+                                photo_count += 1
+                                print(f"      [OK] Downloaded: {filename} ({len(photo_response.content)} bytes)")
+                                
+                            else:
+                                print(f"      [ERROR] No download URL found for {attachment_name}")
+                                
+                        except requests.exceptions.Timeout:
+                            print(f"      [ERROR] Download timeout for {attachment_name}")
+                        except requests.exceptions.RequestException as e:
+                            print(f"      [ERROR] Download failed for {attachment_name}: {e}")
+                        except Exception as e:
+                            print(f"      [ERROR] Error downloading {attachment_name}: {e}")
+                            import traceback
+                            print(f"      Traceback: {traceback.format_exc()}")
+                    else:
+                        print(f"      [SKIP] Skipping non-photo file: {attachment_name}")
+            else:
+                print(f"    No attachments in this form")
+        
+        print(f"Download summary:")
+        print(f"  - Forms processed: {len(forms_data)}")
+        print(f"  - Forms with attachments: {forms_with_attachments}")
+        print(f"  - Total attachments: {total_attachments}")
+        print(f"  - Photo attachments: {photo_attachments}")
+        print(f"  - Photos downloaded: {len(downloaded_photos)}")
+        
+        return downloaded_photos
+
+    def _extract_question_name(self, attachment_name: str, form: dict) -> str:
+        """Extract question name from attachment name or form data"""
+        # Try to find the question name in the form data
+        form_data = form.get('form', {})
+        if isinstance(form_data, dict):
+            # Look for keys or values that might contain the attachment name
+            for key, value in form_data.items():
+                if isinstance(value, str) and attachment_name in value:
+                    # Extract the relevant part
+                    if 'photograph' in key.lower() or 'photo' in key.lower():
+                        return key
+                    elif 'photograph' in value.lower() or 'photo' in value.lower():
+                        # Extract the question name from the value
+                        parts = value.split('-')
+                        for part in parts:
+                            if 'photograph' in part.lower() or 'photo' in part.lower():
+                                return part
+        
+        # Fallback: use a cleaned version of the attachment name
+        return attachment_name.replace('.jpg', '').replace('.jpeg', '').replace('.png', '')
+
+    def _process_downloaded_photos(self, downloaded_photos: list) -> None:
+        """Process downloaded photos and update the GUI"""
+        # Update the valid_metas with downloaded photos
+        self.valid_metas = []
+        for photo_path in downloaded_photos:
+            # Create a PhotoMeta object for each downloaded photo
+            from .filenames import PhotoMeta
+            meta = PhotoMeta(
+                question_id="api_photo",  # We'll extract this from the filename
+                user_id="unknown",
+                form_id="unknown",
+                file_path=photo_path
+            )
+            self.valid_metas.append(meta)
+        
+        # Update the question filter
+        self._refresh_question_menu()
+        
+        # Update status
+        self.status_label.configure(text=f"Downloaded {len(downloaded_photos)} photos from API", text_color="green")
+
+    def _get_api_data(self) -> None:
+        """Handle API data loading with comprehensive error handling"""
+        print("=== Starting API Data Loading ===")
+        
+        # Validate API inputs
+        api_file = self.api_file_var.get().strip()
+        api_limit = self.api_limit_var.get().strip()
+        
+        print(f"API File: {api_file}")
+        print(f"API Limit: {api_limit}")
+        
+        # Get date values from text entries and convert MM/DD/YY to YYYY-MM-DD
+        date_start = self._convert_date_format(self.date_start_var.get().strip())
+        date_end = self._convert_date_format(self.date_end_var.get().strip())
+        
+        print(f"Date Start: {self.date_start_var.get().strip()} -> {date_start}")
+        print(f"Date End: {self.date_end_var.get().strip()} -> {date_end}")
+        
+        if not date_start or not date_end:
+            error_msg = "Please enter valid dates in MM/DD/YY format."
+            print(f"[ERROR] Date validation failed: {error_msg}")
+            from tkinter import messagebox
+            messagebox.showwarning("Invalid Date", error_msg)
+            return
+        
+        if not all([api_file, api_limit]):
+            error_msg = "Please fill in the domain/form file and API limit."
+            print(f"[ERROR] Missing inputs: {error_msg}")
+            from tkinter import messagebox
+            messagebox.showwarning("Missing", error_msg)
+            return
+            
+        try:
+            limit = int(api_limit)
+            if not (20 <= limit <= 1000):
+                error_msg = "API limit must be between 20 and 1000."
+                print(f"[ERROR] Invalid limit: {error_msg}")
+                from tkinter import messagebox
+                messagebox.showwarning("Invalid", error_msg)
+                return
+            print(f"[OK] API limit validated: {limit}")
+        except ValueError:
+            error_msg = "API limit must be a number."
+            print(f"[ERROR] Invalid limit format: {error_msg}")
+            from tkinter import messagebox
+            messagebox.showwarning("Invalid", error_msg)
+            return
+        
+        try:
+            print("=== Parsing Domain/Form Pairs ===")
+            # Parse domain/form pairs file
+            domain_form_pairs = self._parse_domain_form_file(api_file)
+            if not domain_form_pairs:
+                error_msg = "Could not parse domain/form pairs file."
+                print(f"[ERROR] Parse failed: {error_msg}")
+                from tkinter import messagebox
+                messagebox.showerror("Error", error_msg)
+                return
+            print(f"[OK] Parsed {len(domain_form_pairs)} domain/form pairs: {list(domain_form_pairs.keys())}")
+            
+            print("=== Finding .env File ===")
+            # Find .env file
+            env_file = self._find_env_file()
+            if not env_file:
+                error_msg = "Could not find .env file in Coverage directory."
+                print(f"[ERROR] .env file not found: {error_msg}")
+                from tkinter import messagebox
+                messagebox.showerror("Error", error_msg)
+                return
+            print(f"[OK] Found .env file: {env_file}")
+            
+            print("=== Loading API Credentials ===")
+            # Load API credentials
+            api_username, api_key = self._load_api_credentials(env_file)
+            if not api_username or not api_key:
+                error_msg = "Could not load API credentials from .env file."
+                print(f"[ERROR] Credentials not found: {error_msg}")
+                from tkinter import messagebox
+                messagebox.showerror("Error", error_msg)
+                return
+            print(f"[OK] Loaded credentials: Username={api_username[:3]}..., Key={api_key[:8]}...")
+            
+            print("=== Getting Forms from API ===")
+            # Get forms from API
+            forms_data = self._get_forms_from_api(domain_form_pairs, date_start, date_end, api_username, api_key, limit)
+            if not forms_data:
+                error_msg = "No forms found for the specified criteria."
+                print(f"[ERROR] No forms found: {error_msg}")
+                print("Debug info:")
+                print(f"  - Date range: {date_start} to {date_end}")
+                print(f"  - Domains: {list(domain_form_pairs.keys())}")
+                print(f"  - Limit: {limit}")
+                from tkinter import messagebox
+                messagebox.showwarning("No Data", error_msg)
+                return
+            print(f"[OK] Found {len(forms_data)} forms from API")
+            
+            print("=== Downloading Attachments ===")
+            # Download attachments
+            downloaded_photos = self._download_attachments(forms_data, limit, api_username, api_key)
+            if not downloaded_photos:
+                error_msg = "No photos found in the downloaded forms."
+                print(f"[ERROR] No photos downloaded: {error_msg}")
+                print("Debug info:")
+                print(f"  - Forms processed: {len(forms_data)}")
+                print(f"  - Forms with attachments: {sum(1 for form in forms_data if form.get('attachments'))}")
+                from tkinter import messagebox
+                messagebox.showwarning("No Photos", error_msg)
+                return
+            print(f"[OK] Downloaded {len(downloaded_photos)} photos")
+            
+            print("=== Processing Downloaded Photos ===")
+            # Process downloaded photos
+            self._process_downloaded_photos(downloaded_photos)
+            
+            # Update status
+            self.status_label.configure(text=f"Downloaded {len(downloaded_photos)} photos from API", text_color="green")
+            print(f"[OK] API data loading completed successfully!")
+            
+        except Exception as e:
+            error_msg = f"Error during API data loading: {str(e)}"
+            print(f"[ERROR] Unexpected error: {error_msg}")
+            print(f"Exception type: {type(e).__name__}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
+            from tkinter import messagebox
+            messagebox.showerror("API Error", error_msg)
+            return
 
 
 def run_app() -> None:
