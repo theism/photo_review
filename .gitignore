@@ -1,10 +1,30 @@
+# User-specific settings and data files
+app_settings.txt
+api_inputs.txt
+
+# Python cache files
 __pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
 .venv/
-*.pyc
+venv/
+env/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
 .DS_Store
-.env
-/.idea/
-/.vscode/
-/dist/
-/build/
-/*.egg-info/
+Thumbs.db
+
+# Log files
+*.log
+
+# Temporary files
+*.tmp
+*.temp
