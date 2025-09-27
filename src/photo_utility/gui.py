@@ -32,7 +32,7 @@ class App(ctk.CTk):
         self.include_known_bad_var = ctk.BooleanVar(value=False)
         self.known_bad_dir_var = ctk.StringVar()
         self.known_bad_count_var = ctk.StringVar(value="")  # Number of bad photos to insert
-        self.path_mode_var = ctk.StringVar(value="local")  # local or api
+        self.path_mode_var = ctk.StringVar()  # local or api - no default value
         self.reviewer_name_var = ctk.StringVar()
         
         # API-specific variables
@@ -93,7 +93,7 @@ class App(ctk.CTk):
 
         # Data source controls container
         self.data_source_frame = ctk.CTkFrame(frm)
-        self.data_source_frame.pack(fill="x", pady=(0, 8))
+        # Don't pack initially - will be shown when radio button is selected
         
         # Local directory controls
         self.local_dir_frame = ctk.CTkFrame(self.data_source_frame)
@@ -132,11 +132,11 @@ class App(ctk.CTk):
         ctk.CTkButton(api_file_row, text="Check Photo Data", command=self._get_data, width=120).pack(side="left", padx=6)
 
         # Two-column layout
-        columns_frame = ctk.CTkFrame(frm)
-        columns_frame.pack(fill="x", pady=(8, 0))
+        self.columns_frame = ctk.CTkFrame(frm)
+        # Don't pack initially - will be shown when data source is selected
         
         # Left column - Photo filter
-        left_column = ctk.CTkFrame(columns_frame)
+        left_column = ctk.CTkFrame(self.columns_frame)
         left_column.pack(side="left", fill="y", padx=(0, 8))
         left_column.configure(width=500)
         
@@ -148,7 +148,7 @@ class App(ctk.CTk):
         self.question_checkboxes = {}
         
         # Right column - Other configuration
-        right_column = ctk.CTkFrame(columns_frame)
+        right_column = ctk.CTkFrame(self.columns_frame)
         right_column.pack(side="right", fill="y")
         right_column.configure(width=500)
         
@@ -191,9 +191,10 @@ class App(ctk.CTk):
         self.row7_kb.pack_forget()
         self.row8_kb.pack_forget()
 
-        row9 = ctk.CTkFrame(frm)
-        row9.pack(fill="x", pady=(12, 0))
-        ctk.CTkButton(row9, text="Start Review", command=self._build_set, width=120).pack(side="left")
+        # Start Review button (separate from columns frame)
+        self.start_review_frame = ctk.CTkFrame(frm)
+        # Don't pack initially - will be shown when data source is selected
+        ctk.CTkButton(self.start_review_frame, text="Start Review", command=self._build_set, width=120).pack(side="left")
 
     def _browse_dir(self) -> None:
         # Use last directory as default
@@ -680,6 +681,15 @@ class App(ctk.CTk):
     def _on_data_source_change(self) -> None:
         """Handle data source radio button changes"""
         mode = self.path_mode_var.get()
+        
+        # Show the data source frame when any radio button is selected
+        if mode:
+            self.data_source_frame.pack(fill="x", pady=(0, 8))
+            # Show the columns frame
+            self.columns_frame.pack(fill="x", pady=(8, 0))
+            # Show the start review button below the columns frame
+            self.start_review_frame.pack(fill="x", pady=(12, 0))
+        
         if mode == "local":
             self.local_dir_frame.pack(fill="x", pady=(0, 8))
             self.api_controls_frame.pack_forget()
@@ -715,6 +725,8 @@ class App(ctk.CTk):
         )
         if filename:
             self.api_file_var.set(filename)
+            # Save the API file path
+            self._save_settings()
 
     def _convert_date_format(self, date_str: str) -> str:
         """Convert MM/DD/YY to YYYY-MM-DD format"""
@@ -1061,15 +1073,47 @@ class App(ctk.CTk):
         for photo_path in downloaded_photos:
             # Create a PhotoMeta object for each downloaded photo
             from .filenames import PhotoMeta
-            meta = PhotoMeta(
-                question_id="api_photo",  # We'll extract this from the filename
-                user_id="unknown",
-                form_id="unknown",
-                file_path=photo_path
-            )
+            # Extract metadata from the filename
+            photo_path_obj = Path(photo_path)
+            filename = photo_path_obj.name
+            extension = photo_path_obj.suffix.lstrip('.')
+            
+            # Try to parse the filename to extract metadata
+            from .filenames import parse_commcare_filename
+            parsed_meta = parse_commcare_filename(photo_path_obj)
+            
+            if parsed_meta:
+                # Use parsed metadata
+                meta = parsed_meta
+            else:
+                # Try to extract question name from filename
+                # Expected format: test_photo-{question_name}-{user_id}-form_{form_uuid}.jpg
+                # or: api_photo-{question_name}-{user_id}-form_{form_uuid}.jpg
+                question_name = "api_photo"  # Default fallback
+                if filename.startswith(('test_photo-', 'api_photo-')):
+                    # Find the position of the second dash (after question_name)
+                    parts = filename.split('-')
+                    if len(parts) >= 3:
+                        # The question name should be the second part (index 1)
+                        question_name = parts[1]
+                
+                # Create a basic PhotoMeta with extracted question name
+                meta = PhotoMeta(
+                    json_block="api_download",
+                    question_id=question_name,
+                    user_id="unknown",
+                    form_id="unknown",
+                    extension=extension,
+                    filename=filename,
+                    filepath=photo_path_obj
+                )
             self.valid_metas.append(meta)
         
         # Update the question filter
+        # First populate question_options from the valid_metas
+        from .scanner import group_by_question_id
+        groups = group_by_question_id(self.valid_metas)
+        self.question_options = sorted(groups.keys())
         self._refresh_question_menu()
         
         # Update status
@@ -1200,9 +1244,36 @@ class App(ctk.CTk):
             print(f"Exception type: {type(e).__name__}")
             import traceback
             print(f"Traceback: {traceback.format_exc()}")
-            from tkinter import messagebox
-            messagebox.showerror("API Error", error_msg)
-            return
+            
+            # Check if we have any downloaded photos to work with
+            if 'downloaded_photos' in locals() and downloaded_photos:
+                print(f"[INFO] Found {len(downloaded_photos)} photos despite error - proceeding with review")
+                from tkinter import messagebox
+                result = messagebox.askyesno(
+                    "API Error", 
+                    f"{error_msg}\n\nHowever, {len(downloaded_photos)} photos were successfully downloaded.\n\nWould you like to proceed with the review using these photos?"
+                )
+                if result:
+                    print("=== Processing Downloaded Photos (After Error) ===")
+                    # Process downloaded photos with error handling
+                    try:
+                        self._process_downloaded_photos(downloaded_photos)
+                        
+                        # Update status
+                        self.status_label.configure(text=f"Downloaded {len(downloaded_photos)} photos from API (with errors)", text_color="orange")
+                        print(f"[OK] Proceeding with {len(downloaded_photos)} photos despite API error!")
+                        return
+                    except Exception as process_error:
+                        print(f"[ERROR] Failed to process downloaded photos: {process_error}")
+                        from tkinter import messagebox
+                        messagebox.showerror("Processing Error", f"Failed to process downloaded photos: {process_error}")
+                        return
+                else:
+                    return
+            else:
+                from tkinter import messagebox
+                messagebox.showerror("API Error", error_msg)
+                return
 
 
 def run_app() -> None:

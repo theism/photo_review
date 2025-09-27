@@ -15,7 +15,7 @@ class APIResultsViewer:
     def __init__(self):
         self.root = ctk.CTk()
         self.root.title("API Test Results Viewer")
-        self.root.geometry("900x800")
+        self.root.geometry("900x700")
         
         # Create main frame
         main_frame = ctk.CTkFrame(self.root)
@@ -316,64 +316,52 @@ class APIResultsViewer:
                 # Check if it's the expected format: test_photo-{question_name}-{user_id}-form_{form_uuid}
                 if name_without_ext.startswith('test_photo-') and 'form_' in name_without_ext:
                     # Expected format: test_photo-{question_name}-{user_id}-form_{form_uuid}
-                    parts = name_without_ext.split('-')
-                    
-                    if len(parts) >= 4:
-                        # Find the part that starts with 'form_'
-                        form_part = None
-                        for part in parts:
-                            if part.startswith('form_'):
-                                form_part = part
-                                break
+                    # Find the position of 'form_' and extract everything after it
+                    form_start = name_without_ext.find('form_')
+                    if form_start != -1:
+                        # Extract form_id (everything after 'form_')
+                        form_id = name_without_ext[form_start + 5:]  # +5 to skip 'form_'
                         
-                        if form_part:
-                            # Extract form_id (everything after 'form_')
-                            form_id = form_part.replace('form_', '')
-                            
-                            # The question name should be the second part (index 1)
-                            question_name = parts[1] if len(parts) > 1 else "unknown"
-                            
-                            # The user_id should be the third part (index 2)
-                            user_id = parts[2] if len(parts) > 2 else "unknown"
-                            
-                            self.log(f"     Question: {question_name}", "gray")
-                            self.log(f"     User ID: {user_id}", "gray")
-                            self.log(f"     Form ID: {form_id}", "gray")
-                        else:
-                            self.log(f"     Could not parse form ID from filename", "gray")
+                        # Extract question_name and user_id by splitting the part before 'form_'
+                        before_form = name_without_ext[:form_start].rstrip('-')
+                        parts = before_form.split('-')
+                        
+                        # The question name should be the second part (index 1)
+                        question_name = parts[1] if len(parts) > 1 else "unknown"
+                        
+                        # The user_id should be the third part (index 2)
+                        user_id = parts[2] if len(parts) > 2 else "unknown"
+                        
+                        self.log(f"     Question: {question_name}", "gray")
+                        self.log(f"     User ID: {user_id}", "gray")
+                        self.log(f"     Form ID: {form_id}", "gray")
                     else:
-                        self.log(f"     Filename format unexpected: {filename}", "gray")
+                        self.log(f"     Could not find 'form_' in filename", "gray")
                 
                 # Check if it's the api_photo format: api_photo-{question_name}-{user_id}-form_{form_uuid}
                 elif name_without_ext.startswith('api_photo-') and 'form_' in name_without_ext:
                     # API format: api_photo-{question_name}-{user_id}-form_{form_uuid}
-                    parts = name_without_ext.split('-')
-                    
-                    if len(parts) >= 4:
-                        # Find the part that starts with 'form_'
-                        form_part = None
-                        for part in parts:
-                            if part.startswith('form_'):
-                                form_part = part
-                                break
+                    # Find the position of 'form_' and extract everything after it
+                    form_start = name_without_ext.find('form_')
+                    if form_start != -1:
+                        # Extract form_id (everything after 'form_')
+                        form_id = name_without_ext[form_start + 5:]  # +5 to skip 'form_'
                         
-                        if form_part:
-                            # Extract form_id (everything after 'form_')
-                            form_id = form_part.replace('form_', '')
-                            
-                            # The question name should be the second part (index 1)
-                            question_name = parts[1] if len(parts) > 1 else "unknown"
-                            
-                            # The user_id should be the third part (index 2)
-                            user_id = parts[2] if len(parts) > 2 else "unknown"
-                            
-                            self.log(f"     Question: {question_name}", "gray")
-                            self.log(f"     User ID: {user_id}", "gray")
-                            self.log(f"     Form ID: {form_id}", "gray")
-                        else:
-                            self.log(f"     Could not parse form ID from filename", "gray")
+                        # Extract question_name and user_id by splitting the part before 'form_'
+                        before_form = name_without_ext[:form_start].rstrip('-')
+                        parts = before_form.split('-')
+                        
+                        # The question name should be the second part (index 1)
+                        question_name = parts[1] if len(parts) > 1 else "unknown"
+                        
+                        # The user_id should be the third part (index 2)
+                        user_id = parts[2] if len(parts) > 2 else "unknown"
+                        
+                        self.log(f"     Question: {question_name}", "gray")
+                        self.log(f"     User ID: {user_id}", "gray")
+                        self.log(f"     Form ID: {form_id}", "gray")
                     else:
-                        self.log(f"     Filename format unexpected: {filename}", "gray")
+                        self.log(f"     Could not find 'form_' in filename", "gray")
                 
                 # Handle simple timestamp format (like 1749818959721.jpg)
                 elif name_without_ext.isdigit():
