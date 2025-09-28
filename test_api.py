@@ -38,16 +38,16 @@ def test_api_parsing():
             data = json.loads(json_content)
             print(f"Parsed JSON data: {data}\n")
             
-            # Extract domain and form_xmlns from JSON
+            # Extract domain and app_id from JSON
             domain_form_pairs = {}
-            for domain, form_xmlns in data.items():
+            for domain, app_id in data.items():
                 # Clean domain name (remove quotes and extra characters)
                 domain = domain.strip().strip('"')
-                # Clean form_xmlns (remove quotes and extra characters)
-                form_xmlns = form_xmlns.strip().strip('"')
+                # Clean app_id (remove quotes and extra characters)
+                app_id = app_id.strip().strip('"')
                 
-                domain_form_pairs[domain] = form_xmlns
-                print(f"[OK] Domain: '{domain}' -> Form xmlns: '{form_xmlns}'")
+                domain_form_pairs[domain] = app_id
+                print(f"[OK] Domain: '{domain}' -> Form app_id: '{app_id}'")
             
             return domain_form_pairs
             
@@ -95,8 +95,8 @@ def test_api_call(domain_form_pairs, username, api_key):
         return False
     
     # Test with the first domain/form pair
-    domain, form_xmlns = next(iter(domain_form_pairs.items()))
-    print(f"Testing with domain: '{domain}', form_xmlns: '{form_xmlns}'")
+    domain, app_id = next(iter(domain_form_pairs.items()))
+    print(f"Testing with domain: '{domain}', app_id: '{app_id}'")
     
     try:
         # CommCare List Forms API
@@ -104,7 +104,7 @@ def test_api_call(domain_form_pairs, username, api_key):
         print(f"API URL: {url}")
         
         params = {
-            'xmlns': form_xmlns,  # Use the specific form xmlns
+            'app_id': app_id,  # Use the specific form app_id
             'limit': 10  # Small limit for testing
         }
         print(f"API Parameters: {params}")
@@ -196,11 +196,13 @@ def test_photo_download(forms_data, username, api_key):
     download_dir.mkdir(parents=True, exist_ok=True)
     
     photo_count = 0
-    limit = 5  # Limit to 5 photos for testing
+    form_limit = 5  # Limit to 5 forms for testing
     
-    for form in forms_data:
-        if photo_count >= limit:
-            break
+    # Limit the number of forms to process
+    forms_to_process = forms_data[:form_limit]
+    print(f"Processing {len(forms_to_process)} forms (limited to {form_limit})")
+    
+    for form in forms_to_process:
             
         # Get form metadata
         # User ID is in the form.meta section
@@ -217,9 +219,6 @@ def test_photo_download(forms_data, username, api_key):
         print(f"  Found {len(attachments)} attachments")
         
         for attachment_name, attachment_info in attachments.items():
-            if photo_count >= limit:
-                break
-                
             # Check if it's a photo file
             if attachment_name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp')):
                 print(f"  Processing photo: {attachment_name}")

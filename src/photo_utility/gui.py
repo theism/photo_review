@@ -609,12 +609,25 @@ class App(ctk.CTk):
         # rebuild controls
         self._build_path_a_controls()
         
-        # Restore data source selection and hide API controls if local is selected
+        # Get current data source mode
         current_mode = self.path_mode_var.get()
-        if current_mode == "local":
-            self.api_controls_frame.pack_forget()
-        elif current_mode == "api":
-            self.local_dir_frame.pack_forget()
+        
+        # Show the appropriate frames based on current data source
+        if current_mode:
+            # Show the data source frame, columns frame, and start review button
+            self.data_source_frame.pack(fill="x", pady=(0, 8))
+            self.columns_frame.pack(fill="x", pady=(8, 0))
+            self.start_review_frame.pack(fill="x", pady=(12, 0))
+            
+            # Show the appropriate data source specific controls
+            if current_mode == "local":
+                self.local_dir_frame.pack(fill="x", pady=(0, 8))
+                self.api_controls_frame.pack_forget()
+                self.status_label.configure(text="Select a directory and click 'Check Photo Data'", text_color="gray")
+            elif current_mode == "api":
+                self.local_dir_frame.pack_forget()
+                self.api_controls_frame.pack(fill="x", pady=(0, 8))
+                self.status_label.configure(text="Configure API settings and click 'Check Photo Data'", text_color="gray")
         
         # Restore known bad photos checkbox state and show/hide controls accordingly
         if self.include_known_bad_var.get():
@@ -772,12 +785,12 @@ class App(ctk.CTk):
             data = json.loads(content)
             
             domain_form_pairs = {}
-            for domain, form_xmlns in data.items():
-                # Extract UUID from form_xmlns if it's a full URL
-                if form_xmlns.startswith('http'):
+            for domain, app_id in data.items():
+                # Extract UUID from app_id if it's a full URL
+                if app_id.startswith('http'):
                     # Extract UUID from URL like "http://openrosa.org/formdesigner/UUID"
-                    form_xmlns = form_xmlns.split('/')[-1]
-                domain_form_pairs[domain] = form_xmlns
+                    app_id = app_id.split('/')[-1]
+                domain_form_pairs[domain] = app_id
             
             return domain_form_pairs
         except Exception as e:
@@ -815,9 +828,9 @@ class App(ctk.CTk):
         
         all_forms = []
         
-        for domain, form_xmlns in domain_form_pairs.items():
+        for domain, app_id in domain_form_pairs.items():
             print(f"  Processing domain: {domain}")
-            print(f"  Form xmlns: {form_xmlns}")
+            print(f"  Form app_id: {app_id}")
             
             try:
                 # CommCare List Forms API
@@ -825,7 +838,7 @@ class App(ctk.CTk):
                 print(f"  API URL: {url}")
                 
                 params = {
-                    'xmlns': form_xmlns,
+                    'app_id': app_id,
                     'limit': limit
                 }
                 
@@ -849,24 +862,24 @@ class App(ctk.CTk):
                         forms = data['objects']
                         print(f"  Found {len(forms)} forms for domain {domain}")
                         
-                        # If no forms found with xmlns, try without xmlns parameter
+                        # If no forms found with app_id, try without app_id parameter
                         if len(forms) == 0:
-                            print(f"  No forms found with xmlns '{form_xmlns}', trying without xmlns filter...")
-                            params_without_xmlns = {k: v for k, v in params.items() if k != 'xmlns'}
-                            print(f"  Retry API Parameters: {params_without_xmlns}")
+                            print(f"  No forms found with app_id '{app_id}', trying without app_id filter...")
+                            params_without_app_id = {k: v for k, v in params.items() if k != 'app_id'}
+                            print(f"  Retry API Parameters: {params_without_app_id}")
                             
-                            retry_response = requests.get(url, auth=(username, api_key), params=params_without_xmlns, timeout=30)
+                            retry_response = requests.get(url, auth=(username, api_key), params=params_without_app_id, timeout=30)
                             if retry_response.status_code == 200:
                                 retry_data = retry_response.json()
                                 if 'objects' in retry_data:
                                     retry_forms = retry_data['objects']
-                                    print(f"  Found {len(retry_forms)} forms without xmlns filter")
+                                    print(f"  Found {len(retry_forms)} forms without app_id filter")
                                     all_forms.extend(retry_forms)
                                     
                                     # Show sample of what forms are available
                                     if retry_forms:
                                         sample_form = retry_forms[0]
-                                        print(f"  Sample form xmlns: {sample_form.get('xmlns', 'N/A')}")
+                                        print(f"  Sample form app_id: {sample_form.get('app_id', 'N/A')}")
                                         print(f"  Sample form type: {sample_form.get('type', 'N/A')}")
                         else:
                             all_forms.extend(forms)
@@ -910,7 +923,7 @@ class App(ctk.CTk):
         
         print(f"Starting photo download process...")
         print(f"Forms to process: {len(forms_data)}")
-        print(f"Photo limit: {limit}")
+        print(f"Form limit: {limit}")
         
         downloaded_photos = []
         # Create timestamped subdirectory for this download session
@@ -925,10 +938,11 @@ class App(ctk.CTk):
         total_attachments = 0
         photo_attachments = 0
         
-        for i, form in enumerate(forms_data):
-            if photo_count >= limit:
-                print(f"Reached photo limit ({limit}), stopping download")
-                break
+        # Limit the number of forms to process
+        forms_to_process = forms_data[:limit]
+        print(f"Processing {len(forms_to_process)} forms (limited to {limit})")
+        
+        for i, form in enumerate(forms_to_process):
                 
             print(f"  Processing form {i+1}/{len(forms_data)}")
             
@@ -953,9 +967,6 @@ class App(ctk.CTk):
                 total_attachments += len(attachments)
                 
                 for attachment_name, attachment_info in attachments.items():
-                    if photo_count >= limit:
-                        break
-                        
                     print(f"      Processing attachment: {attachment_name}")
                     print(f"      Attachment info type: {type(attachment_info)}")
                     print(f"      Attachment info keys: {list(attachment_info.keys()) if isinstance(attachment_info, dict) else 'Not a dict'}")
@@ -1023,7 +1034,7 @@ class App(ctk.CTk):
                 print(f"    No attachments in this form")
         
         print(f"Download summary:")
-        print(f"  - Forms processed: {len(forms_data)}")
+        print(f"  - Forms processed: {len(forms_to_process)} (limited to {limit})")
         print(f"  - Forms with attachments: {forms_with_attachments}")
         print(f"  - Total attachments: {total_attachments}")
         print(f"  - Photo attachments: {photo_attachments}")

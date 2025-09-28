@@ -106,16 +106,16 @@ class APIResultsViewer:
                 data = json.loads(json_content)
                 self.log(f"Parsed JSON data: {data}\n")
                 
-                # Extract domain and form_xmlns from JSON
+                # Extract domain and app_id from JSON
                 domain_form_pairs = {}
-                for domain, form_xmlns in data.items():
+                for domain, app_id in data.items():
                     # Clean domain name (remove quotes and extra characters)
                     domain = domain.strip().strip('"')
-                    # Clean form_xmlns (remove quotes and extra characters)
-                    form_xmlns = form_xmlns.strip().strip('"')
+                    # Clean app_id (remove quotes and extra characters)
+                    app_id = app_id.strip().strip('"')
                     
-                    domain_form_pairs[domain] = form_xmlns
-                    self.log(f"✅ Domain: '{domain}' -> Form xmlns: '{form_xmlns}'", "green")
+                    domain_form_pairs[domain] = app_id
+                    self.log(f"✅ Domain: '{domain}' -> Form app_id: '{app_id}'", "green")
                 
                 return domain_form_pairs
                 
@@ -170,80 +170,89 @@ class APIResultsViewer:
             self.log("❌ Cannot proceed without API credentials", "red")
             return
         
-        # Test API call
-        domain, form_xmlns = next(iter(domain_form_pairs.items()))
-        self.log(f"Testing with domain: '{domain}', form_xmlns: '{form_xmlns}'")
+        # Test API call for each domain
+        all_forms = []
+        total_forms = 0
         
-        try:
-            # CommCare List Forms API
-            url = f"https://www.commcarehq.org/a/{domain}/api/v0.5/form/"
-            self.log(f"API URL: {url}")
+        for domain, app_id in domain_form_pairs.items():
+            self.log(f"Testing with domain: '{domain}', app_id: '{app_id}'")
             
-            params = {
-                'xmlns': form_xmlns,
-                'limit': 10  # Small limit for testing
-            }
-            self.log(f"API Parameters: {params}")
-            
-            self.log("Making API request...")
-            response = requests.get(url, auth=(username, api_key), params=params, timeout=30)
-            self.log(f"Response status: {response.status_code}")
-            
-            if response.status_code == 200:
-                data = response.json()
-                self.log("✅ API call successful!", "green")
-                self.log(f"Response keys: {list(data.keys())}")
+            try:
+                # CommCare List Forms API
+                url = f"https://www.commcarehq.org/a/{domain}/api/v0.5/form/"
+                self.log(f"API URL: {url}")
                 
-                if 'objects' in data:
-                    forms = data['objects']
-                    self.log(f"Found {len(forms)} forms")
+                params = {
+                    'app_id': app_id,
+                    'limit': 10  # Small limit for testing
+                }
+                self.log(f"API Parameters: {params}")
+                
+                self.log("Making API request...")
+                response = requests.get(url, auth=(username, api_key), params=params, timeout=30)
+                self.log(f"Response status: {response.status_code}")
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    self.log("✅ API call successful!", "green")
+                    self.log(f"Response keys: {list(data.keys())}")
                     
-                    if forms:
-                        self.log("Sample form data:")
-                        sample_form = forms[0]
-                        for key, value in sample_form.items():
-                            if isinstance(value, str) and len(value) > 50:
-                                self.log(f"  {key}: {value[:50]}...")
-                            else:
-                                self.log(f"  {key}: {value}")
+                    if 'objects' in data:
+                        forms = data['objects']
+                        self.log(f"Found {len(forms)} forms for domain {domain}")
+                        all_forms.extend(forms)
+                        total_forms += len(forms)
                         
-                        # Look for forms with photo attachments
-                        self.log(f"\nLooking for forms with photo attachments...")
-                        photo_forms = []
-                        for form in forms:
-                            attachments = form.get('attachments', {})
-                            for filename, attachment_info in attachments.items():
-                                if filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp')):
-                                    photo_forms.append(form)
-                                    self.log(f"✅ Found form with photo: {filename}", "green")
-                                    break
-                        
-                        if photo_forms:
-                            self.log(f"Found {len(photo_forms)} forms with photo attachments", "green")
-                        else:
-                            self.log("No forms with photo attachments found")
-                            
-                        # Check form types
-                        form_types = set()
-                        for form in forms:
-                            form_types.add(form.get('type', 'unknown'))
-                        self.log(f"Form types found: {form_types}")
-                        
+                        if forms:
+                            self.log("Sample form data:")
+                            sample_form = forms[0]
+                            for key, value in sample_form.items():
+                                if isinstance(value, str) and len(value) > 50:
+                                    self.log(f"  {key}: {value[:50]}...")
+                                else:
+                                    self.log(f"  {key}: {value}")
                     else:
-                        self.log("No forms found for this domain/form combination")
+                        self.log("No 'objects' key in response")
+                        self.log(f"Response data: {data}")
                 else:
-                    self.log("No 'objects' key in response")
-                    self.log(f"Response data: {data}")
+                    self.log(f"❌ API call failed with status {response.status_code}", "red")
+                    self.log(f"Response: {response.text}")
+                    
+            except requests.exceptions.Timeout:
+                self.log(f"❌ API request timed out for domain {domain}", "red")
+            except requests.exceptions.RequestException as e:
+                self.log(f"❌ API request failed for domain {domain}: {e}", "red")
+            except Exception as e:
+                self.log(f"❌ Unexpected error for domain {domain}: {e}", "red")
+                continue
+        
+        # Process all collected forms
+        if all_forms:
+            self.log(f"\nTotal forms collected from all domains: {total_forms}")
+            
+            # Look for forms with photo attachments
+            self.log(f"\nLooking for forms with photo attachments...")
+            photo_forms = []
+            for form in all_forms:
+                attachments = form.get('attachments', {})
+                for filename, attachment_info in attachments.items():
+                    if filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp')):
+                        photo_forms.append(form)
+                        self.log(f"✅ Found form with photo: {filename}", "green")
+                        break
+            
+            if photo_forms:
+                self.log(f"Found {len(photo_forms)} forms with photo attachments", "green")
             else:
-                self.log(f"❌ API call failed with status {response.status_code}", "red")
-                self.log(f"Response: {response.text}")
+                self.log("No forms with photo attachments found")
                 
-        except requests.exceptions.Timeout:
-            self.log("❌ API request timed out", "red")
-        except requests.exceptions.RequestException as e:
-            self.log(f"❌ API request failed: {e}", "red")
-        except Exception as e:
-            self.log(f"❌ Unexpected error: {e}", "red")
+            # Check form types
+            form_types = set()
+            for form in all_forms:
+                form_types.add(form.get('type', 'unknown'))
+            self.log(f"Form types found: {form_types}")
+        else:
+            self.log("No forms found for any domain/form combination")
     
     def test_photo_download(self):
         """Test the photo download functionality"""
