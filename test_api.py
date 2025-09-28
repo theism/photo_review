@@ -198,9 +198,9 @@ def test_photo_download(forms_data, username, api_key):
     photo_count = 0
     form_limit = 5  # Limit to 5 forms for testing
     
-    # Limit the number of forms to process
-    forms_to_process = forms_data[:form_limit]
-    print(f"Processing {len(forms_to_process)} forms (limited to {form_limit})")
+    # Process all forms (limit was already applied per domain in API call)
+    forms_to_process = forms_data
+    print(f"Processing {len(forms_to_process)} forms (limit {form_limit} per domain)")
     
     for form in forms_to_process:
             

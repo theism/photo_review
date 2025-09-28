@@ -119,14 +119,14 @@ class App(ctk.CTk):
         # Number of forms to download
         limit_row = ctk.CTkFrame(self.api_controls_frame)
         limit_row.pack(fill="x", pady=(0, 8))
-        ctk.CTkLabel(limit_row, text="Number of forms to download:").pack(side="left")
+        ctk.CTkLabel(limit_row, text="Number of forms to download per domain:").pack(side="left")
         ctk.CTkEntry(limit_row, textvariable=self.api_limit_var, width=80).pack(side="left", padx=(6, 0))
         ctk.CTkLabel(limit_row, text="Max 1000 forms. Download from HQ exporter if you want more", text_color="gray").pack(side="left", padx=(6, 0))
         
-        # Domain/form pairs file
+        # domain/app pairs file
         api_file_row = ctk.CTkFrame(self.api_controls_frame)
         api_file_row.pack(fill="x", pady=(0, 8))
-        ctk.CTkLabel(api_file_row, text="Domain/form pairs file:").pack(side="left")
+        ctk.CTkLabel(api_file_row, text="Domain/app pairs file:").pack(side="left")
         ctk.CTkEntry(api_file_row, textvariable=self.api_file_var, width=400).pack(side="left", padx=6)
         ctk.CTkButton(api_file_row, text="Browse", command=self._browse_api_file, width=80).pack(side="left", padx=6)
         ctk.CTkButton(api_file_row, text="Check Photo Data", command=self._get_data, width=120).pack(side="left", padx=6)
@@ -771,7 +771,7 @@ class App(ctk.CTk):
             return ""
 
     def _parse_domain_form_file(self, file_path: str) -> dict:
-        """Parse the domain/form pairs file"""
+        """Parse the domain/app pairs file"""
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
@@ -794,7 +794,7 @@ class App(ctk.CTk):
             
             return domain_form_pairs
         except Exception as e:
-            print(f"Error parsing domain/form file: {e}")
+            print(f"Error parsing domain/app file: {e}")
             return {}
 
     def _find_env_file(self) -> str:
@@ -938,9 +938,9 @@ class App(ctk.CTk):
         total_attachments = 0
         photo_attachments = 0
         
-        # Limit the number of forms to process
-        forms_to_process = forms_data[:limit]
-        print(f"Processing {len(forms_to_process)} forms (limited to {limit})")
+        # Process all forms (limit was already applied per domain in API call)
+        forms_to_process = forms_data
+        print(f"Processing {len(forms_to_process)} forms (limit applied per domain: {limit})")
         
         for i, form in enumerate(forms_to_process):
                 
@@ -1034,7 +1034,7 @@ class App(ctk.CTk):
                 print(f"    No attachments in this form")
         
         print(f"Download summary:")
-        print(f"  - Forms processed: {len(forms_to_process)} (limited to {limit})")
+        print(f"  - Forms processed: {len(forms_to_process)} (limit {limit} per domain)")
         print(f"  - Forms with attachments: {forms_with_attachments}")
         print(f"  - Total attachments: {total_attachments}")
         print(f"  - Photo attachments: {photo_attachments}")
@@ -1156,7 +1156,7 @@ class App(ctk.CTk):
             return
         
         if not all([api_file, api_limit]):
-            error_msg = "Please fill in the domain/form file and API limit."
+            error_msg = "Please fill in the domain/app file and API limit."
             print(f"[ERROR] Missing inputs: {error_msg}")
             from tkinter import messagebox
             messagebox.showwarning("Missing", error_msg)
@@ -1179,16 +1179,16 @@ class App(ctk.CTk):
             return
         
         try:
-            print("=== Parsing Domain/Form Pairs ===")
-            # Parse domain/form pairs file
+            print("=== Parsing Domain/App Pairs ===")
+            # Parse domain/app pairs file
             domain_form_pairs = self._parse_domain_form_file(api_file)
             if not domain_form_pairs:
-                error_msg = "Could not parse domain/form pairs file."
+                error_msg = "Could not parse domain/app pairs file."
                 print(f"[ERROR] Parse failed: {error_msg}")
                 from tkinter import messagebox
                 messagebox.showerror("Error", error_msg)
                 return
-            print(f"[OK] Parsed {len(domain_form_pairs)} domain/form pairs: {list(domain_form_pairs.keys())}")
+            print(f"[OK] Parsed {len(domain_form_pairs)} domain/app pairs: {list(domain_form_pairs.keys())}")
             
             print("=== Finding .env File ===")
             # Find .env file
