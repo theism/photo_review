@@ -1,6 +1,6 @@
 # Photo Review Utility
 
-A Python utility for reviewing and categorizing photos from CommCareHQ forms to determine if they indicate real or fraudulent visits. The utility supports both local directory analysis and API-based photo downloading from CommCareHQ.
+A Python utility for reviewing and categorizing photo attachments on CommCareHQ forms to determine if they indicate real or fraudulent visits. The utility supports both local directory analysis and API-based photo downloading from CommCareHQ.  Code developed with Cursor AI tool.
 
 ## Features
 
@@ -8,9 +8,8 @@ A Python utility for reviewing and categorizing photos from CommCareHQ forms to 
 - **Photo Filtering**: Multi-select filtering by question type with photo counts
 - **Custom Review Categories**: Define custom buckets for photo classification (e.g., "Real", "Fake", "Verified", etc.)
 - **Known Bad Photo Integration**: Optionally include known fraudulent photos in the review set
-- **Randomized Review Process**: Photos are randomized for unbiased review
+- **Randomized Review Process**: Photos from the selected data source are randomized (if local, from the full local set, if api, from what is downloaded)
 - **CSV Export**: Export review results with metadata including reviewer name and date
-- **Modern GUI**: Built with CustomTkinter for a clean, modern interface
 
 ## Installation
 
@@ -23,27 +22,16 @@ A Python utility for reviewing and categorizing photos from CommCareHQ forms to 
 
 1. **Clone the repository**:
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/theism/photo_review
    cd photo_review
    ```
 
-2. **Create a virtual environment** (recommended):
-   ```bash
-   python -m venv venv
-   
-   # On Windows:
-   venv\Scripts\activate
-   
-   # On macOS/Linux:
-   source venv/bin/activate
-   ```
-
-3. **Install dependencies**:
+2. **Install dependencies**:
    ```bash
    pip install -r requirements.txt
    ```
 
-4. **Run the application**:
+3. **Run the application**:
    ```bash
    python photo_utility
    ```
@@ -59,33 +47,35 @@ python photo_utility
 ### Data Source Options
 
 #### Option 1: Local Directory
-1. Select "Local Directory" radio button
-2. Browse to a directory containing CommCareHQ photos
+1. Ensure you have already downloaded photos from CommCareHQ, following [Multimedia Export](https://dimagi.atlassian.net/wiki/spaces/commcarepublic/pages/2143956271/Form+Data+Export#Multimedia-Exports) instructions
+2. In the application, select "Local Directory" radio button
+2. Browse to a directory containing your downloaded CommCareHQ photos
 3. Click "Check Photo Data" to validate photo naming format
 4. Configure review settings and start review
 
 #### Option 2: CommCareHQ API
-1. Select "CommCare API" radio button
+1. Select "CommCareHQ API" radio button
 2. Configure API settings:
-   - **Domain/Form Pairs File**: JSON file with domain and form mappings
+   - **Domain/App Pairs File**: JSON file with domain and app mappings
    - **Date Range**: Optional start and end dates (MM/DD/YY format)
    - **Number of Forms**: Limit forms to download (20-1000)
 3. Click "Check Photo Data" to download photos from API
 4. Configure review settings and start review
+5. Note that photos downloaded are saved in ..\photo_review\downloaded_photos and can be referenced via the Local Directory method in future sessions.
 
 ### API Configuration
 
-#### Domain/Form Pairs File Format
+#### Domain/App Pairs File Format
 Create a JSON file with domain and form mappings:
 ```json
 {
-  "domain1": "form_xmlns_1",
-  "domain2": "form_xmlns_2"
+  "domain1": "app_id_1",
+  "domain2": "app_id_2"
 }
 ```
 
 #### API Credentials
-Create a `.env` file in a "Coverage" directory with:
+Create a `.env` file.  If you have already done this for the Coverage tool or followed these [instructions](https://dimagi.atlassian.net/wiki/spaces/connect/pages/3159162916/Connect+Analysis+Tools#Create-.env-file), then this step is complete.  Otherwise, create a .env file with :
 ```
 COMMCARE_USERNAME=your_username
 COMMCARE_API_KEY=your_api_key
@@ -95,7 +85,7 @@ COMMCARE_API_KEY=your_api_key
 
 1. **Configure Review Settings**:
    - **Reviewer Name**: Your name (saved for future sessions)
-   - **Photo Filter**: Select which question types to review
+   - **Photo Filter**: Select which types of photos to review
    - **Percent to Display**: Percentage of photos to review (with live count)
    - **Review Categories**: Define custom buckets for classification
    - **Known Bad Photos**: Optionally include known fraudulent photos
@@ -120,11 +110,10 @@ photo_review/
 │   ├── scanner.py              # Photo scanning logic
 │   ├── filenames.py            # Filename parsing
 │   └── __main__.py             # Application entry point
-├── requirements.txt             # Python dependencies
+├── requirements.txt            # Python dependencies
 ├── photo_utility               # Application launcher
 ├── test_api.py                 # API testing utility
 ├── view_api_results.py         # API results viewer
-├── api_inputs.txt              # Example API input file
 ├── app_settings.txt            # Application settings (auto-generated)
 └── downloaded_photos/          # Downloaded photos (auto-generated)
 ```
@@ -168,7 +157,7 @@ Automatically created to persist:
 Example format for API domain/form pairs:
 ```json
 {
-  "connect-experiments": "DFB8B67C-8307-4206-9FE0-2F0AA2ECB8EF"
+  "connect-experiments": "86bab9977e9afe5a61dbd30e0e500da7"
 }
 ```
 
@@ -177,22 +166,23 @@ Example format for API domain/form pairs:
 ### Common Issues
 
 1. **"No module named 'customtkinter'"**:
-   - Ensure virtual environment is activated
    - Run `pip install -r requirements.txt`
 
 2. **"No forms found"**:
    - Check API credentials in `.env` file
-   - Verify domain/form pairs in input file
+   - Verify domain/app pairs in input file
    - Check date range settings
+   - Use the view_api_results test utility
 
 3. **Photos not displaying**:
    - Ensure photos have proper file extensions
    - Check photo naming format matches CommCareHQ conventions
 
 4. **API connection issues**:
-   - Verify credentials in Coverage/.env file
+   - Verify credentials in \.env file
    - Check network connectivity
    - Verify domain names and form IDs
+   - Use the view_api_results test utility
 
 ### Debug Mode
 
@@ -221,10 +211,3 @@ Check terminal output for detailed error messages and API responses.
 ## License
 
 See LICENSE file for details.
-
-## Support
-
-For issues and questions:
-1. Check the troubleshooting section
-2. Review terminal output for error messages
-3. Create an issue with detailed description and error logs

@@ -85,7 +85,7 @@ class App(ctk.CTk):
         mode_row.pack(fill="x", pady=(0, 8))
         ctk.CTkLabel(mode_row, text="Data Source:").pack(side="left")
         ctk.CTkRadioButton(mode_row, text="Local directory", variable=self.path_mode_var, value="local", command=self._on_data_source_change).pack(side="left", padx=(6, 0))
-        ctk.CTkRadioButton(mode_row, text="CommCare API", variable=self.path_mode_var, value="api", command=self._on_data_source_change).pack(side="left", padx=(6, 0))
+        ctk.CTkRadioButton(mode_row, text="CommCareHQ API", variable=self.path_mode_var, value="api", command=self._on_data_source_change).pack(side="left", padx=(6, 0))
 
         # Status text below data source
         self.status_label = ctk.CTkLabel(frm, text="Select a directory and click 'Check Photo Data'", text_color="gray")
@@ -799,11 +799,38 @@ class App(ctk.CTk):
 
     def _find_env_file(self) -> str:
         """Find the .env file in Coverage directory"""
-        import os
-        coverage_path = r"C:\Users\Mathew Theis\Documents\Coverage\.env"
-        if os.path.exists(coverage_path):
-            return coverage_path
-        return ""
+        return find_env_file()
+
+def find_env_file() -> str:
+    """Find the .env file in Coverage directory - shared utility function"""
+    import os
+    from pathlib import Path
+    
+    # Get user's home directory
+    home_dir = Path.home()
+    
+    # Search for Coverage folder in common locations
+    search_paths = [
+        home_dir / "Documents" / "Coverage" / ".env",
+        home_dir / "Coverage" / ".env",
+        home_dir / "Documents" / "Coverage" / "Coverage" / ".env",  # Nested Coverage folder
+        Path.cwd() / "Coverage" / ".env",  # Current working directory
+    ]
+    
+    # Also search for any Coverage folder in Documents
+    documents_dir = home_dir / "Documents"
+    if documents_dir.exists():
+        for item in documents_dir.iterdir():
+            if item.is_dir() and item.name.lower() == "coverage":
+                search_paths.append(item / ".env")
+    
+    # Check each potential path
+    for env_path in search_paths:
+        if env_path.exists():
+            print(f"  Found .env file at: {env_path}")
+            return str(env_path)
+    
+    return ""
 
     def _load_api_credentials(self, env_file: str) -> tuple:
         """Load API credentials from .env file"""
@@ -938,6 +965,9 @@ class App(ctk.CTk):
         total_attachments = 0
         photo_attachments = 0
         
+        # Track photos per domain
+        photos_per_domain = {}
+        
         # Process all forms (limit was already applied per domain in API call)
         forms_to_process = forms_data
         print(f"Processing {len(forms_to_process)} forms (limit applied per domain: {limit})")
@@ -1015,6 +1045,12 @@ class App(ctk.CTk):
                                 
                                 downloaded_photos.append(str(file_path))
                                 photo_count += 1
+                                
+                                # Track photos per domain
+                                if domain not in photos_per_domain:
+                                    photos_per_domain[domain] = 0
+                                photos_per_domain[domain] += 1
+                                
                                 print(f"      [OK] Downloaded: {filename} ({len(photo_response.content)} bytes)")
                                 
                             else:
@@ -1039,6 +1075,14 @@ class App(ctk.CTk):
         print(f"  - Total attachments: {total_attachments}")
         print(f"  - Photo attachments: {photo_attachments}")
         print(f"  - Photos downloaded: {len(downloaded_photos)}")
+        
+        # Show photos per domain
+        if photos_per_domain:
+            print(f"  - Photos per domain:")
+            for domain, count in photos_per_domain.items():
+                print(f"    * {domain}: {count} photos")
+        else:
+            print(f"  - No photos downloaded from any domain")
         
         return downloaded_photos
 
@@ -1194,7 +1238,7 @@ class App(ctk.CTk):
             # Find .env file
             env_file = self._find_env_file()
             if not env_file:
-                error_msg = "Could not find .env file in Coverage directory."
+                error_msg = "Could not find .env file in any Coverage directory. Please ensure you have a .env file in a 'Coverage' folder in your Documents directory or home directory."
                 print(f"[ERROR] .env file not found: {error_msg}")
                 from tkinter import messagebox
                 messagebox.showerror("Error", error_msg)

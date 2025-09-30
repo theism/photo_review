@@ -123,13 +123,43 @@ class APIResultsViewer:
             self.log(f"❌ Error parsing API inputs file: {e}", "red")
             return None
     
+    def find_env_file(self):
+        """Find the .env file in Coverage directory - shared utility function"""
+        from pathlib import Path
+        
+        # Get user's home directory
+        home_dir = Path.home()
+        
+        # Search for Coverage folder in common locations
+        search_paths = [
+            home_dir / "Documents" / "Coverage" / ".env",
+            home_dir / "Coverage" / ".env",
+            home_dir / "Documents" / "Coverage" / "Coverage" / ".env",  # Nested Coverage folder
+            Path.cwd() / "Coverage" / ".env",  # Current working directory
+        ]
+        
+        # Also search for any Coverage folder in Documents
+        documents_dir = home_dir / "Documents"
+        if documents_dir.exists():
+            for item in documents_dir.iterdir():
+                if item.is_dir() and item.name.lower() == "coverage":
+                    search_paths.append(item / ".env")
+        
+        # Check each potential path
+        for env_path in search_paths:
+            if env_path.exists():
+                self.log(f"  Found .env file at: {env_path}", "green")
+                return str(env_path)
+        
+        return ""
+
     def test_env(self):
         """Test finding and reading the .env file"""
         self.log("\n=== Testing .env File ===", "blue")
         
-        coverage_path = Path("C:/Users/Mathew Theis/Documents/Coverage/.env")
-        if not coverage_path.exists():
-            self.log(f"❌ .env file not found at: {coverage_path}", "red")
+        coverage_path = self.find_env_file()
+        if not coverage_path:
+            self.log(f"❌ .env file not found in any Coverage directory", "red")
             return None, None
         
         try:

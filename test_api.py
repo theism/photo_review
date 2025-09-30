@@ -55,13 +55,43 @@ def test_api_parsing():
         print(f"[ERROR] Error parsing API inputs file: {e}")
         return False
 
+def find_env_file():
+    """Find the .env file in Coverage directory - shared utility function"""
+    from pathlib import Path
+    
+    # Get user's home directory
+    home_dir = Path.home()
+    
+    # Search for Coverage folder in common locations
+    search_paths = [
+        home_dir / "Documents" / "Coverage" / ".env",
+        home_dir / "Coverage" / ".env",
+        home_dir / "Documents" / "Coverage" / "Coverage" / ".env",  # Nested Coverage folder
+        Path.cwd() / "Coverage" / ".env",  # Current working directory
+    ]
+    
+    # Also search for any Coverage folder in Documents
+    documents_dir = home_dir / "Documents"
+    if documents_dir.exists():
+        for item in documents_dir.iterdir():
+            if item.is_dir() and item.name.lower() == "coverage":
+                search_paths.append(item / ".env")
+    
+    # Check each potential path
+    for env_path in search_paths:
+        if env_path.exists():
+            print(f"  Found .env file at: {env_path}")
+            return str(env_path)
+    
+    return ""
+
 def test_env_file():
     """Test finding and reading the .env file"""
     print("\n=== Testing .env File ===")
     
-    coverage_path = Path("C:/Users/Mathew Theis/Documents/Coverage/.env")
-    if not coverage_path.exists():
-        print(f"[FAIL] .env file not found at: {coverage_path}")
+    coverage_path = find_env_file()
+    if not coverage_path:
+        print(f"[FAIL] .env file not found in any Coverage directory")
         return None, None
     
     try:
@@ -198,6 +228,9 @@ def test_photo_download(forms_data, username, api_key):
     photo_count = 0
     form_limit = 5  # Limit to 5 forms for testing
     
+    # Track photos per domain
+    photos_per_domain = {}
+    
     # Process all forms (limit was already applied per domain in API call)
     forms_to_process = forms_data
     print(f"Processing {len(forms_to_process)} forms (limit {form_limit} per domain)")
@@ -265,6 +298,12 @@ def test_photo_download(forms_data, username, api_key):
                         
                         downloaded_photos.append(str(file_path))
                         photo_count += 1
+                        
+                        # Track photos per domain
+                        if domain not in photos_per_domain:
+                            photos_per_domain[domain] = 0
+                        photos_per_domain[domain] += 1
+                        
                         print(f"    [OK] Downloaded: {filename}")
                         
                     else:
@@ -273,6 +312,18 @@ def test_photo_download(forms_data, username, api_key):
                 except Exception as e:
                     print(f"    [ERROR] Error downloading {attachment_name}: {e}")
                     continue
+    
+    # Print download summary
+    print(f"\nDownload summary:")
+    print(f"  - Photos downloaded: {len(downloaded_photos)}")
+    
+    # Show photos per domain
+    if photos_per_domain:
+        print(f"  - Photos per domain:")
+        for domain, count in photos_per_domain.items():
+            print(f"    * {domain}: {count} photos")
+    else:
+        print(f"  - No photos downloaded from any domain")
     
     return downloaded_photos
 
