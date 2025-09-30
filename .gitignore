@@ -1,6 +1,7 @@
 # User-specific settings and data files
 app_settings.txt
 api_inputs.txt
+.env
 
 # Downloaded photos directory
 downloaded_photos/

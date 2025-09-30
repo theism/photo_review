@@ -56,13 +56,18 @@ def test_api_parsing():
         return False
 
 def find_env_file():
-    """Find the .env file in Coverage directory - shared utility function"""
+    """Find the .env file - first check current directory, then Coverage directories"""
     from pathlib import Path
     
-    # Get user's home directory
+    # First priority: Check for .env file in current photo_utility directory
+    current_env = Path.cwd() / ".env"
+    if current_env.exists():
+        print(f"  Found .env file in current directory: {current_env}")
+        return str(current_env)
+    
+    # Second priority: Search for Coverage folder in common locations
     home_dir = Path.home()
     
-    # Search for Coverage folder in common locations
     search_paths = [
         home_dir / "Documents" / "Coverage" / ".env",
         home_dir / "Coverage" / ".env",

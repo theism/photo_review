@@ -12,7 +12,6 @@ from datetime import datetime
 import webbrowser
 import requests
 import json
-import os
 
 from .scanner import scan_directory_for_photos, group_by_question_id, group_by_form_id
 
@@ -802,14 +801,19 @@ class App(ctk.CTk):
         return find_env_file()
 
 def find_env_file() -> str:
-    """Find the .env file in Coverage directory - shared utility function"""
+    """Find the .env file - first check current directory, then Coverage directories"""
     import os
     from pathlib import Path
     
-    # Get user's home directory
+    # First priority: Check for .env file in current photo_utility directory
+    current_env = Path.cwd() / ".env"
+    if current_env.exists():
+        print(f"  Found .env file in current directory: {current_env}")
+        return str(current_env)
+    
+    # Second priority: Search for Coverage folder in common locations
     home_dir = Path.home()
     
-    # Search for Coverage folder in common locations
     search_paths = [
         home_dir / "Documents" / "Coverage" / ".env",
         home_dir / "Coverage" / ".env",
