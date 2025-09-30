@@ -16,6 +16,13 @@ import json
 from .scanner import scan_directory_for_photos, group_by_question_id, group_by_form_id
 
 
+def debug_print(message: str) -> None:
+    """Print debug message if debug mode is enabled"""
+    import os
+    if os.environ.get('PHOTO_REVIEW_DEBUG') == '1':
+        print(f"DEBUG: {message}")
+
+
 class App(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
@@ -219,10 +226,12 @@ class App(ctk.CTk):
 
     def _get_data(self) -> None:
         mode = self.path_mode_var.get()
+        debug_print(f"Data source mode: {mode}")
         
         if mode == "local":
             # Handle local directory
             directory = self.dir_var.get().strip()
+            debug_print(f"Local directory: {directory}")
             if not directory:
                 from tkinter import messagebox
                 messagebox.showwarning("Missing", "Please select a directory.")
@@ -233,9 +242,11 @@ class App(ctk.CTk):
                 messagebox.showerror("Invalid", "Directory does not exist.")
                 return
 
+            debug_print(f"Scanning directory: {root}")
             valid, invalid = scan_directory_for_photos(root)
             self.valid_metas = valid
             self.invalid_paths = invalid
+            debug_print(f"Found {len(valid)} valid photos, {len(invalid)} invalid paths")
         elif mode == "api":
             # Handle API data
             self._get_api_data()
@@ -800,42 +811,6 @@ class App(ctk.CTk):
         """Find the .env file in Coverage directory"""
         return find_env_file()
 
-def find_env_file() -> str:
-    """Find the .env file - first check current directory, then Coverage directories"""
-    import os
-    from pathlib import Path
-    
-    # First priority: Check for .env file in current photo_utility directory
-    current_env = Path.cwd() / ".env"
-    if current_env.exists():
-        print(f"  Found .env file in current directory: {current_env}")
-        return str(current_env)
-    
-    # Second priority: Search for Coverage folder in common locations
-    home_dir = Path.home()
-    
-    search_paths = [
-        home_dir / "Documents" / "Coverage" / ".env",
-        home_dir / "Coverage" / ".env",
-        home_dir / "Documents" / "Coverage" / "Coverage" / ".env",  # Nested Coverage folder
-        Path.cwd() / "Coverage" / ".env",  # Current working directory
-    ]
-    
-    # Also search for any Coverage folder in Documents
-    documents_dir = home_dir / "Documents"
-    if documents_dir.exists():
-        for item in documents_dir.iterdir():
-            if item.is_dir() and item.name.lower() == "coverage":
-                search_paths.append(item / ".env")
-    
-    # Check each potential path
-    for env_path in search_paths:
-        if env_path.exists():
-            print(f"  Found .env file at: {env_path}")
-            return str(env_path)
-    
-    return ""
-
     def _load_api_credentials(self, env_file: str) -> tuple:
         """Load API credentials from .env file"""
         try:
@@ -860,13 +835,13 @@ def find_env_file() -> str:
         all_forms = []
         
         for domain, app_id in domain_form_pairs.items():
-            print(f"  Processing domain: {domain}")
-            print(f"  Form app_id: {app_id}")
+            debug_print(f"  Processing domain: {domain}")
+            debug_print(f"  Form app_id: {app_id}")
             
             try:
                 # CommCare List Forms API
                 url = f"https://www.commcarehq.org/a/{domain}/api/v0.5/form/"
-                print(f"  API URL: {url}")
+                debug_print(f"  API URL: {url}")
                 
                 params = {
                     'app_id': app_id,
@@ -878,52 +853,52 @@ def find_env_file() -> str:
                     params['received_on_start'] = date_start
                 if date_end and date_end.strip():
                     params['received_on_end'] = date_end
-                print(f"  API Parameters: {params}")
+                debug_print(f"  API Parameters: {params}")
                 
-                print(f"  Making API request...")
+                debug_print(f"  Making API request...")
                 response = requests.get(url, auth=(username, api_key), params=params, timeout=30)
-                print(f"  Response status: {response.status_code}")
+                debug_print(f"  Response status: {response.status_code}")
                 
                 if response.status_code == 200:
                     data = response.json()
-                    print(f"  [OK] API call successful")
-                    print(f"  Response keys: {list(data.keys())}")
+                    debug_print(f"  [OK] API call successful")
+                    debug_print(f"  Response keys: {list(data.keys())}")
                     
                     if 'objects' in data:
                         forms = data['objects']
-                        print(f"  Found {len(forms)} forms for domain {domain}")
+                        debug_print(f"  Found {len(forms)} forms for domain {domain}")
                         
                         # If no forms found with app_id, try without app_id parameter
                         if len(forms) == 0:
                             print(f"  No forms found with app_id '{app_id}', trying without app_id filter...")
                             params_without_app_id = {k: v for k, v in params.items() if k != 'app_id'}
-                            print(f"  Retry API Parameters: {params_without_app_id}")
+                            debug_print(f"  Retry API Parameters: {params_without_app_id}")
                             
                             retry_response = requests.get(url, auth=(username, api_key), params=params_without_app_id, timeout=30)
                             if retry_response.status_code == 200:
                                 retry_data = retry_response.json()
                                 if 'objects' in retry_data:
                                     retry_forms = retry_data['objects']
-                                    print(f"  Found {len(retry_forms)} forms without app_id filter")
+                                    debug_print(f"  Found {len(retry_forms)} forms without app_id filter")
                                     all_forms.extend(retry_forms)
                                     
                                     # Show sample of what forms are available
                                     if retry_forms:
                                         sample_form = retry_forms[0]
-                                        print(f"  Sample form app_id: {sample_form.get('app_id', 'N/A')}")
-                                        print(f"  Sample form type: {sample_form.get('type', 'N/A')}")
+                                        debug_print(f"  Sample form app_id: {sample_form.get('app_id', 'N/A')}")
+                                        debug_print(f"  Sample form type: {sample_form.get('type', 'N/A')}")
                         else:
                             all_forms.extend(forms)
                         
                         # Debug: Show sample form data
                         if forms:
                             sample_form = forms[0]
-                            print(f"  Sample form keys: {list(sample_form.keys())}")
+                            debug_print(f"  Sample form keys: {list(sample_form.keys())}")
                             if 'attachments' in sample_form:
                                 attachments = sample_form['attachments']
-                                print(f"  Sample form has {len(attachments)} attachments")
+                                debug_print(f"  Sample form has {len(attachments)} attachments")
                                 for att_name, att_info in list(attachments.items())[:3]:  # Show first 3
-                                    print(f"    - {att_name}: {type(att_info)}")
+                                    debug_print(f"    - {att_name}: {type(att_info)}")
                     else:
                         print(f"  [ERROR] No 'objects' key in response for domain {domain}")
                         print(f"  Response data: {data}")
@@ -954,7 +929,6 @@ def find_env_file() -> str:
         
         print(f"Starting photo download process...")
         print(f"Forms to process: {len(forms_data)}")
-        print(f"Form limit: {limit}")
         
         downloaded_photos = []
         # Create timestamped subdirectory for this download session
@@ -962,7 +936,7 @@ def find_env_file() -> str:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         download_dir = Path("downloaded_photos") / f"session_{timestamp}"
         download_dir.mkdir(parents=True, exist_ok=True)
-        print(f"Download directory: {download_dir.absolute()}")
+        debug_print(f"Download directory: {download_dir.absolute()}")
         
         photo_count = 0
         forms_with_attachments = 0
@@ -974,11 +948,11 @@ def find_env_file() -> str:
         
         # Process all forms (limit was already applied per domain in API call)
         forms_to_process = forms_data
-        print(f"Processing {len(forms_to_process)} forms (limit applied per domain: {limit})")
+        debug_print(f"Processing {len(forms_to_process)} forms (limit applied per domain: {limit})")
         
         for i, form in enumerate(forms_to_process):
                 
-            print(f"  Processing form {i+1}/{len(forms_data)}")
+            debug_print(f"  Processing form {i+1}/{len(forms_data)}")
             
             # Get form metadata
             # User ID is in the form.meta section
@@ -988,27 +962,27 @@ def find_env_file() -> str:
             form_id = form.get('id', 'unknown')
             domain = form.get('domain', 'unknown')
             
-            print(f"    Form ID: {form_id}")
-            print(f"    User ID: {user_id}")
-            print(f"    Domain: {domain}")
+            debug_print(f"    Form ID: {form_id}")
+            debug_print(f"    User ID: {user_id}")
+            debug_print(f"    Domain: {domain}")
             
             # Get attachments from the form data (already included in forms list API)
             attachments = form.get('attachments', {})
-            print(f"    Attachments found: {len(attachments)}")
+            debug_print(f"    Attachments found: {len(attachments)}")
             
             if attachments:
                 forms_with_attachments += 1
                 total_attachments += len(attachments)
                 
                 for attachment_name, attachment_info in attachments.items():
-                    print(f"      Processing attachment: {attachment_name}")
-                    print(f"      Attachment info type: {type(attachment_info)}")
-                    print(f"      Attachment info keys: {list(attachment_info.keys()) if isinstance(attachment_info, dict) else 'Not a dict'}")
+                    debug_print(f"      Processing attachment: {attachment_name}")
+                    debug_print(f"      Attachment info type: {type(attachment_info)}")
+                    debug_print(f"      Attachment info keys: {list(attachment_info.keys()) if isinstance(attachment_info, dict) else 'Not a dict'}")
                     
                     # Check if it's a photo file
                     if attachment_name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp')):
                         photo_attachments += 1
-                        print(f"      [OK] Photo file detected: {attachment_name}")
+                        debug_print(f"      [OK] Photo file detected: {attachment_name}")
                         
                         try:
                             # Get the download URL from attachment info
@@ -1017,17 +991,17 @@ def find_env_file() -> str:
                                 # Try alternative URL structure
                                 download_url = attachment_info.get('url')
                             
-                            print(f"      Download URL: {download_url}")
+                            debug_print(f"      Download URL: {download_url}")
                             
                             if download_url:
-                                print(f"      Downloading photo...")
+                                debug_print(f"      Downloading photo...")
                                 # Download the photo
                                 photo_response = requests.get(download_url, auth=(username, api_key), timeout=30)
                                 photo_response.raise_for_status()
                                 
                                 # Extract question name from attachment name or form data
                                 question_name = self._extract_question_name(attachment_name, form)
-                                print(f"      Question name: {question_name}")
+                                debug_print(f"      Question name: {question_name}")
                                 
                                 # Create filename in CommCare format with proper extension
                                 # Determine file extension from original attachment name
@@ -1055,7 +1029,7 @@ def find_env_file() -> str:
                                     photos_per_domain[domain] = 0
                                 photos_per_domain[domain] += 1
                                 
-                                print(f"      [OK] Downloaded: {filename} ({len(photo_response.content)} bytes)")
+                                debug_print(f"      [OK] Downloaded: {filename} ({len(photo_response.content)} bytes)")
                                 
                             else:
                                 print(f"      [ERROR] No download URL found for {attachment_name}")
@@ -1069,9 +1043,9 @@ def find_env_file() -> str:
                             import traceback
                             print(f"      Traceback: {traceback.format_exc()}")
                     else:
-                        print(f"      [SKIP] Skipping non-photo file: {attachment_name}")
+                        debug_print(f"      [SKIP] Skipping non-photo file: {attachment_name}")
             else:
-                print(f"    No attachments in this form")
+                debug_print(f"    No attachments in this form")
         
         print(f"Download summary:")
         print(f"  - Forms processed: {len(forms_to_process)} (limit {limit} per domain)")
@@ -1102,11 +1076,11 @@ def find_env_file() -> str:
                         current_path = f"{path}.{key}" if path else key
                         if isinstance(value, str) and value == attachment_name:
                             # Found the key that corresponds to this attachment
-                            print(f"      DEBUG: Found question key '{key}' for attachment '{attachment_name}' at path '{current_path}'")
+                            debug_print(f"      DEBUG: Found question key '{key}' for attachment '{attachment_name}' at path '{current_path}'")
                             return key
                         elif isinstance(value, str) and attachment_name in value:
                             # Partial match - the value contains the attachment name
-                            print(f"      DEBUG: Found partial match - key '{key}' contains attachment '{attachment_name}' at path '{current_path}'")
+                            debug_print(f"      DEBUG: Found partial match - key '{key}' contains attachment '{attachment_name}' at path '{current_path}'")
                             return key
                         elif isinstance(value, dict):
                             # Recursively search nested dictionaries
@@ -1122,7 +1096,7 @@ def find_env_file() -> str:
         
         # Fallback: use a cleaned version of the attachment name
         fallback_name = attachment_name.replace('.jpg', '').replace('.jpeg', '').replace('.png', '')
-        print(f"      DEBUG: Using fallback question name: {fallback_name}")
+        debug_print(f"      DEBUG: Using fallback question name: {fallback_name}")
         return fallback_name
 
     def _process_downloaded_photos(self, downloaded_photos: list) -> None:
@@ -1180,7 +1154,7 @@ def find_env_file() -> str:
 
     def _get_api_data(self) -> None:
         """Handle API data loading with comprehensive error handling"""
-        print("=== Starting API Data Loading ===")
+        debug_print("=== Starting API Data Loading ===")
         
         # Validate API inputs
         api_file = self.api_file_var.get().strip()
@@ -1193,8 +1167,9 @@ def find_env_file() -> str:
         date_start = self._convert_date_format(self.date_start_var.get().strip())
         date_end = self._convert_date_format(self.date_end_var.get().strip())
         
-        print(f"Date Start: {self.date_start_var.get().strip()} -> {date_start}")
-        print(f"Date End: {self.date_end_var.get().strip()} -> {date_end}")
+        debug_print(f"Date Start: {self.date_start_var.get().strip()} -> {date_start}")
+        debug_print(f"Date End: {self.date_end_var.get().strip()} -> {date_end}")
+
         
         if not date_start or not date_end:
             error_msg = "Please enter valid dates in MM/DD/YY format."
@@ -1218,7 +1193,7 @@ def find_env_file() -> str:
                 from tkinter import messagebox
                 messagebox.showwarning("Invalid", error_msg)
                 return
-            print(f"[OK] API limit validated: {limit}")
+            debug_print(f"[OK] API limit validated: {limit}")
         except ValueError:
             error_msg = "API limit must be a number."
             print(f"[ERROR] Invalid limit format: {error_msg}")
@@ -1227,7 +1202,7 @@ def find_env_file() -> str:
             return
         
         try:
-            print("=== Parsing Domain/App Pairs ===")
+            debug_print("=== Parsing Domain/App Pairs ===")
             # Parse domain/app pairs file
             domain_form_pairs = self._parse_domain_form_file(api_file)
             if not domain_form_pairs:
@@ -1236,20 +1211,20 @@ def find_env_file() -> str:
                 from tkinter import messagebox
                 messagebox.showerror("Error", error_msg)
                 return
-            print(f"[OK] Parsed {len(domain_form_pairs)} domain/app pairs: {list(domain_form_pairs.keys())}")
+            debug_print(f"Parsed {len(domain_form_pairs)} domain/app pairs: {list(domain_form_pairs.keys())}")
             
-            print("=== Finding .env File ===")
+            debug_print("=== Finding .env File ===")
             # Find .env file
             env_file = self._find_env_file()
             if not env_file:
-                error_msg = "Could not find .env file in any Coverage directory. Please ensure you have a .env file in a 'Coverage' folder in your Documents directory or home directory."
+                error_msg = "Could not find .env file."
                 print(f"[ERROR] .env file not found: {error_msg}")
                 from tkinter import messagebox
                 messagebox.showerror("Error", error_msg)
                 return
-            print(f"[OK] Found .env file: {env_file}")
+            debug_print(f"Found .env file: {env_file}")
             
-            print("=== Loading API Credentials ===")
+            debug_print("=== Loading API Credentials ===")
             # Load API credentials
             api_username, api_key = self._load_api_credentials(env_file)
             if not api_username or not api_key:
@@ -1258,9 +1233,9 @@ def find_env_file() -> str:
                 from tkinter import messagebox
                 messagebox.showerror("Error", error_msg)
                 return
-            print(f"[OK] Loaded credentials: Username={api_username[:3]}..., Key={api_key[:8]}...")
+            debug_print(f"Loaded credentials: Username={api_username[:3]}..., Key={api_key[:8]}...")
             
-            print("=== Getting Forms from API ===")
+            debug_print("=== Getting Forms from API ===")
             # Get forms from API
             forms_data = self._get_forms_from_api(domain_form_pairs, date_start, date_end, api_username, api_key, limit)
             if not forms_data:
@@ -1273,9 +1248,9 @@ def find_env_file() -> str:
                 from tkinter import messagebox
                 messagebox.showwarning("No Data", error_msg)
                 return
-            print(f"[OK] Found {len(forms_data)} forms from API")
+            debug_print(f"Found {len(forms_data)} forms from API")
             
-            print("=== Downloading Attachments ===")
+            debug_print("=== Downloading Attachments ===")
             # Download attachments
             downloaded_photos = self._download_attachments(forms_data, limit, api_username, api_key)
             if not downloaded_photos:
@@ -1287,9 +1262,9 @@ def find_env_file() -> str:
                 from tkinter import messagebox
                 messagebox.showwarning("No Photos", error_msg)
                 return
-            print(f"[OK] Downloaded {len(downloaded_photos)} photos")
+            debug_print(f"Downloaded {len(downloaded_photos)} photos")
             
-            print("=== Processing Downloaded Photos ===")
+            debug_print("=== Processing Downloaded Photos ===")
             # Process downloaded photos
             self._process_downloaded_photos(downloaded_photos)
             
@@ -1333,6 +1308,43 @@ def find_env_file() -> str:
                 from tkinter import messagebox
                 messagebox.showerror("API Error", error_msg)
                 return
+
+
+def find_env_file() -> str:
+    """Find the .env file - first check current directory, then Coverage directories"""
+    import os
+    from pathlib import Path
+    
+    # First priority: Check for .env file in current photo_utility directory
+    current_env = Path.cwd() / ".env"
+    if current_env.exists():
+        debug_print(f"  Found .env file in current directory: {current_env}")
+        return str(current_env)
+    
+    # Second priority: Search for Coverage folder in common locations
+    home_dir = Path.home()
+    
+    search_paths = [
+        home_dir / "Documents" / "Coverage" / ".env",
+        home_dir / "Coverage" / ".env",
+        home_dir / "Documents" / "Coverage" / "Coverage" / ".env",  # Nested Coverage folder
+        Path.cwd() / "Coverage" / ".env",  # Current working directory
+    ]
+    
+    # Also search for any Coverage folder in Documents
+    documents_dir = home_dir / "Documents"
+    if documents_dir.exists():
+        for item in documents_dir.iterdir():
+            if item.is_dir() and item.name.lower() == "coverage":
+                search_paths.append(item / ".env")
+    
+    # Check each potential path
+    for env_path in search_paths:
+        if env_path.exists():
+            print(f"  Found .env file at: {env_path}")
+            return str(env_path)
+    
+    return ""
 
 
 def run_app() -> None:

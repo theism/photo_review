@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import argparse
 
 
 def _add_src_to_path() -> None:
@@ -12,6 +13,17 @@ def _add_src_to_path() -> None:
 
 
 def main() -> None:
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Photo Review Utility')
+    parser.add_argument('--debug', action='store_true', 
+                       help='Enable debug mode with verbose output')
+    args = parser.parse_args()
+    
+    # Set debug mode as environment variable
+    if args.debug:
+        os.environ['PHOTO_REVIEW_DEBUG'] = '1'
+        print("🐛 Debug mode enabled - verbose output will be shown")
+    
     _add_src_to_path()
     from photo_utility.__main__ import main as pkg_main
 
