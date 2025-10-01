@@ -44,6 +44,20 @@ A Python utility for reviewing and categorizing photo attachments on CommCareHQ 
 python photo_utility
 ```
 
+#### Command Line Options
+
+- **`--debug`**: Enable debug mode with verbose output
+- **`--help`**: Show help message and exit
+
+Examples:
+```bash
+# Run with debug output
+python photo_utility --debug
+
+# Show help
+python photo_utility --help
+```
+
 ### Data Source Options
 
 #### Option 1: Local Directory
@@ -186,10 +200,18 @@ Example format for API domain/form pairs:
 
 ### Debug Mode
 
-Run with debug output:
+Run with debug output to see detailed logging information:
 ```bash
-python photo_utility
+python photo_utility --debug
 ```
+
+Debug mode provides:
+- Detailed API request/response information
+- File processing steps
+- Error tracebacks
+- Photo download progress
+- Form parsing details
+
 Check terminal output for detailed error messages and API responses.
 
 ## Dependencies
